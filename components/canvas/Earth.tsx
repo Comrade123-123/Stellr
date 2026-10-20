@@ -5,10 +5,9 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import * as THREE from "three";
 import { scroll, sceneIndex } from "@/lib/scroll";
+import { SUN_DIRECTION } from "@/lib/solar";
 import { useAppStore } from "@/lib/store";
 
-/** Sun direction in world space, shared by every lit surface around Earth. */
-export const SUN_DIRECTION = new THREE.Vector3(0.9, 0.28, 0.65).normalize();
 
 const ATMOSPHERE = new THREE.Color(0.3, 0.58, 1.0);
 const AXIAL_TILT = THREE.MathUtils.degToRad(23.4);

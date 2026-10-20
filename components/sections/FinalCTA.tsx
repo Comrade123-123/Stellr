@@ -19,7 +19,7 @@ export default function FinalCTA() {
       data-label="WAITLIST"
       className="relative flex min-h-svh flex-col items-center px-5 pt-[16vh] text-center sm:px-10"
     >
-      <IndexBar index="006" label="WAITLIST" className="w-full max-w-[1100px] text-left" />
+      <IndexBar index="007" label="WAITLIST" className="w-full max-w-[1100px] text-left" />
       <h2 className="display mt-14 max-w-[20ch] text-[clamp(1.9rem,4.2vw,4.4rem)] text-ink">
         <SplitWords text="Be first to fly through the universe." />
       </h2>

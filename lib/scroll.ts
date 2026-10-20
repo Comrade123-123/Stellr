@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { ORBIT_PLANE, SUN_POSITION } from "./solar";
 
 /**
  * Scroll → journey → camera.
@@ -55,6 +56,13 @@ interface Waypoint {
 }
 
 /** One waypoint per `data-scene` section, in page order. */
+/** A pose expressed in the orbital plane's frame: offsets from the Sun along Sun→Earth, north and prograde. */
+function inOrbitFrame(target: [number, number, number], eye: [number, number, number]): Pose {
+  const toWorld = (v: [number, number, number]) =>
+    new THREE.Vector3(v[0], v[1], -v[2]).applyQuaternion(ORBIT_PLANE).add(SUN_POSITION).toArray() as Vec3;
+  return { target: toWorld(target), position: toWorld(eye) };
+}
+
 export const CAMERA_PATH: Waypoint[] = [
   {
     id: "intro",
@@ -92,6 +100,13 @@ export const CAMERA_PATH: Waypoint[] = [
     // High over the orbital plane: the globe sits under the readout grid, rings sweep across.
     wide: { position: [0.6, 5.5, 7.5], target: [0.2, 2.6, 0] },
     tall: { position: [0.4, 4.8, 8.5], target: [0.1, 2.65, 0] },
+  },
+  {
+    id: "cosmoscope",
+    // Far above the orbital plane: the inner system sits right of the copy, Earth's gold orbit and label below,
+    // the giants' orbits sweeping off-frame. Coordinates are (toward Earth, north, prograde).
+    wide: inOrbitFrame([20, 0, -42], [190, 190, -26]),
+    tall: inOrbitFrame([-26, 0, 0], [230, 400, 20]),
   },
   {
     id: "cta",

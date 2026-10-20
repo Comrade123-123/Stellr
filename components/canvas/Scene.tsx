@@ -11,6 +11,7 @@ import CameraRig from "./CameraRig";
 import Earth from "./Earth";
 import Effects from "./Effects";
 import Orbits from "./Orbits";
+import SolarSystem from "./SolarSystem";
 import Starfield from "./Starfield";
 
 // Fires from image load callbacks, never during a React render.
@@ -95,6 +96,10 @@ export default function Scene() {
         <Earth segments={quality.sphereSegments} reducedMotion={quality.reducedMotion} />
         <Orbits reducedMotion={quality.reducedMotion} />
         <Ready />
+      </Suspense>
+      {/* Loads after first paint and never holds up the loader. */}
+      <Suspense fallback={null}>
+        <SolarSystem reducedMotion={quality.reducedMotion} />
       </Suspense>
       <DevCapture />
       <CameraRig parallax={!quality.reducedMotion && !quality.isMobile} />

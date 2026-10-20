@@ -1,4 +1,5 @@
 import CanvasRoot from "@/components/canvas/CanvasRoot";
+import Cosmoscope from "@/components/sections/Cosmoscope";
 import Header from "@/components/Header";
 import LiveChip from "@/components/LiveChip";
 import Loader from "@/components/Loader";
@@ -27,6 +28,7 @@ export default function Home() {
         <Manifesto />
         <Tools />
         <Telemetry />
+        <Cosmoscope />
         <FinalCTA />
       </main>
       <div className="relative z-10">
