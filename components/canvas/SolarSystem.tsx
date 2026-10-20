@@ -130,7 +130,8 @@ export default function SolarSystem({ reducedMotion }: { reducedMotion: boolean 
   );
 
   useFrame((_, delta) => {
-    const near = Math.abs(scroll.journey - cosmo) < 1.05;
+    // Only while flying out to the Cosmoscope and back, never in the neighbouring sections.
+    const near = scroll.journey > cosmo - 0.6 && scroll.journey < cosmo + 0.6;
     if (root.current) root.current.visible = near;
     if (near !== labels) setLabels(near);
     if (!near) return;
