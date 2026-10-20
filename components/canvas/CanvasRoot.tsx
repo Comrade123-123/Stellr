@@ -3,6 +3,7 @@
 import { Component, type ReactNode, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { appStore } from "@/lib/store";
+import FallbackBackdrop from "./FallbackBackdrop";
 
 // three.js and the scenes ship in their own chunk, fetched after first paint.
 const Scene = dynamic(() => import("./Scene"), { ssr: false });
@@ -17,11 +18,13 @@ class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean
     appStore.set({ ready: true });
   }
   render() {
-    return this.state.failed ? null : this.props.children;
+    return this.state.failed ? <FallbackBackdrop /> : this.props.children;
   }
 }
 
 function hasWebGL() {
+  // `?fallback` forces the image backdrop, for testing it on machines where WebGL works.
+  if (new URLSearchParams(location.search).has("fallback")) return false;
   try {
     const canvas = document.createElement("canvas");
     return Boolean(canvas.getContext("webgl2") ?? canvas.getContext("webgl"));
@@ -49,6 +52,7 @@ export default function CanvasRoot() {
           <Scene />
         </SceneBoundary>
       )}
+      {supported === false && <FallbackBackdrop />}
     </div>
   );
 }

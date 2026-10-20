@@ -50,7 +50,8 @@ export default function SkyTonight() {
 
   useEffect(() => {
     if (!place) return;
-    appStore.set({ observer: place });
+    // `?poster` renders the shared no-WebGL backdrops, which must not carry one city's pin.
+    if (!new URLSearchParams(location.search).has("poster")) appStore.set({ observer: place });
     let cancelled = false;
     const run = async () => {
       const { computeSky } = await import("@/lib/sky");

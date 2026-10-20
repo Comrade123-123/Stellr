@@ -117,9 +117,20 @@ html.lenis body {
   50% { opacity: 0.25; }
 }
 
+/* No-WebGL backdrop frames drift slowly so the page doesn't feel frozen. */
+.fallback-drift {
+  animation: fallback-drift 24s ease-in-out infinite alternate;
+}
+
+@keyframes fallback-drift {
+  from { transform: scale(1) translate3d(0, 0, 0); }
+  to { transform: scale(1.07) translate3d(-1%, -1%, 0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scroll-cue,
-  .live-dot {
+  .live-dot,
+  .fallback-drift {
     animation: none;
   }
 }
