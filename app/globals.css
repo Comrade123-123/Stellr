@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-void: #000000;
+  --color-ink: #eceef2;
+  /* Visor gold: the single accent. */
+  --color-gold: #c9a46a;
+  --font-display: var(--font-archivo), system-ui, sans-serif;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+html {
+  background: #000;
+  color-scheme: dark;
+}
+
+body {
+  background: #000;
+  color: #eceef2;
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+::selection {
+  background: #c9a46a;
+  color: #000;
+}
+
+html.is-loading {
+  overflow: hidden;
+}
+
+/* Lenis (its stylesheet isn't exported by the package) */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+  overflow: clip;
+}
+
+/* Component classes live in a layer so Tailwind utilities (e.g. `fixed`) can override them. */
+@layer components {
+  /* Headings: light, extended capitals (after the AXIOM logotype). */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 300;
+    font-stretch: 125%;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    line-height: 1.04;
+  }
+
+  /* Subheads and editorial copy: same face, narrower and smaller. */
+  .caps {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-stretch: 112%;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.55;
+  }
+
+  /* Thin frame with corner ticks, used for panels and HUD blocks. */
+  .frame {
+    position: relative;
+    border: 1px solid rgb(236 238 242 / 0.14);
+  }
+  .frame::before,
+  .frame::after {
+    content: "";
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: #eceef2;
+  }
+  .frame::before {
+    top: -3px;
+    left: -3px;
+  }
+  .frame::after {
+    bottom: -3px;
+    right: -3px;
+  }
+
+  .header-scrim {
+    background: rgb(0 0 0 / 0.55);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    mask-image: linear-gradient(to bottom, #000 60%, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
+  }
+}
+
+.scroll-cue {
+  animation: scroll-cue 2.2s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+@keyframes scroll-cue {
+  0%, 100% { transform: translateY(-2px); }
+  50% { transform: translateY(3px); }
+}
+
+.live-dot {
+  animation: live-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes live-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-cue,
+  .live-dot {
+    animation: none;
+  }
+}
