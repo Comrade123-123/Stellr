@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { OUTPOST_EYE, OUTPOST_EYE_TALL, lookFrom, lookFromEye } from "./outpost";
+import { INTRO_TALL, INTRO_WIDE, sunrisePose } from "./launch";
 import { ORBIT_PLANE, SUN_POSITION } from "./solar";
 
 /**
@@ -63,24 +63,19 @@ function inOrbitFrame(target: [number, number, number], eye: [number, number, nu
   return { target: toWorld(target), position: toWorld(eye) };
 }
 
-const EYE = OUTPOST_EYE.toArray() as Vec3;
-const EYE_TALL = OUTPOST_EYE_TALL.toArray() as Vec3;
-
 /** One waypoint per `data-scene` section, in page order. */
 export const CAMERA_PATH: Waypoint[] = [
   {
     id: "intro",
-    // Standing on the outpost planetoid, looking up into open sky; the black hole is below the frame.
-    wide: { position: EYE, target: lookFromEye([0.12, 0.92, -0.4]) },
-    tall: { position: EYE_TALL, target: lookFrom(OUTPOST_EYE_TALL, [0.25, 0.92, -0.4]) },
+    // The launch pad at night: rocket centred, its plume filling the lower frame.
+    wide: INTRO_WIDE,
+    tall: INTRO_TALL,
   },
   {
     id: "hero",
-    // Tilt down to the horizon: the black hole rises centre-right over the astronaut.
-    wide: { position: EYE, target: lookFromEye([0.1, -0.05, -1]) },
-    // Portrait: lower eye, pitched up so the headline gets dark sky and the black hole
-    // with the astronaut silhouetted against it fills the lower half.
-    tall: { position: EYE_TALL, target: lookFrom(OUTPOST_EYE_TALL, [0.33, 0.21, -1]) },
+    // In orbit over Earth's night side, the Sun breaking over the horizon.
+    wide: sunrisePose(1.9, 0.08),
+    tall: sunrisePose(2.4, 0.12),
   },
   {
     id: "sky",

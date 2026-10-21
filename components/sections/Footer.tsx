@@ -62,17 +62,6 @@ export default function Footer() {
               CC BY 4.0
             </a>
           </span>
-          <span className="block">
-            Z2 SPACESUIT MODEL:{" "}
-            <a href="https://github.com/nasa/NASA-3D-Resources" target="_blank" rel="noreferrer" className={linkClass}>
-              NASA 3D RESOURCES
-            </a>
-            {" "}· REGOLITH TEXTURE:{" "}
-            <a href="https://polyhaven.com/a/moon_dusted_02" target="_blank" rel="noreferrer" className={linkClass}>
-              POLY HAVEN (CC0)
-            </a>
-            {" "}· NO ENDORSEMENT IMPLIED
-          </span>
         </span>
       </div>
     </footer>

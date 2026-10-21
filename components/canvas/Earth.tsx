@@ -78,7 +78,8 @@ const earthFragment = /* glsl */ `
 
     // Thin atmospheric scattering along the limb, only where the sun reaches.
     float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.0);
-    float sunSide = smoothstep(-0.25, 0.55, ndl);
+    // Only limb that the Sun actually reaches glows, so a sunrise shows a thin arc, not a full ring.
+    float sunSide = smoothstep(0.3, 0.9, ndl);
     color += uAtmosphere * fresnel * sunSide * 1.3;
 
     // Warm band along the terminator.
@@ -129,7 +130,9 @@ const atmosphereFragment = /* glsl */ `
     float depth = clamp(-dot(N, V), 0.0, 1.0);
     float glow = pow(smoothstep(0.0, 0.42, depth), 3.2);
     float ndl = dot(N, normalize(uSun));
-    float sunSide = smoothstep(-0.12, 0.6, ndl);
+    // From close in, the whole visible limb is grazingly sunlit; keep the glow to the part
+    // facing the Sun more squarely, so a sunrise reads as an arc, not a ring.
+    float sunSide = smoothstep(0.35, 0.95, ndl);
     float dusk = smoothstep(-0.05, 0.05, ndl) * smoothstep(0.3, 0.05, ndl);
     vec3 tint = mix(uAtmosphere, vec3(1.0, 0.6, 0.35), dusk * 0.3);
 
@@ -230,8 +233,8 @@ export default function Earth({ segments, reducedMotion }: EarthProps) {
     // straight at the camera; elsewhere it eases back to the normal axial tilt.
     const near = THREE.MathUtils.clamp(1 - Math.abs(scroll.journey - skyIndex) / 0.75, 0, 1);
     const focus = near * near * (3 - 2 * near);
-    // Earth stays out of the opening outpost scene; it appears once the camera lifts off towards it.
-    if (tilt.current) tilt.current.visible = scroll.journey >= skyIndex - 0.65;
+    // Earth stays out of the launch-site shot; it appears as the camera climbs to orbit.
+    if (tilt.current) tilt.current.visible = scroll.journey >= 0.4;
 
     if (tilt.current) {
       const { goal } = scratch;

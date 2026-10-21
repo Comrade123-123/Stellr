@@ -7,16 +7,15 @@ import { DefaultLoadingManager } from "three";
 import { getQuality } from "@/lib/quality";
 import { scroll } from "@/lib/scroll";
 import { appStore, useAppStore } from "@/lib/store";
-import AsteroidField from "./AsteroidField";
-import BlackHole from "./BlackHole";
 import CameraRig from "./CameraRig";
 import Earth from "./Earth";
 import Effects from "./Effects";
+import LaunchScene from "./LaunchScene";
 import Meteors from "./Meteors";
 import Orbits from "./Orbits";
-import Outpost from "./Outpost";
 import SolarSystem from "./SolarSystem";
 import Starfield from "./Starfield";
+import SunFlare from "./SunFlare";
 
 // Fires from image load callbacks, never during a React render.
 DefaultLoadingManager.onProgress = (_url, loaded, total) => {
@@ -99,9 +98,12 @@ export default function Scene() {
         <Starfield count={degraded ? Math.round(quality.starCount / 2) : quality.starCount} reducedMotion={quality.reducedMotion} />
         <Earth segments={quality.sphereSegments} reducedMotion={quality.reducedMotion} />
         <Orbits reducedMotion={quality.reducedMotion} />
-        <AsteroidField count={quality.asteroidCount} reducedMotion={quality.reducedMotion} />
-        <Outpost segments={quality.sphereSegments} />
-        <BlackHole reducedMotion={quality.reducedMotion} />
+        <LaunchScene
+          plumeCount={degraded ? Math.round(quality.plumeCount / 2) : quality.plumeCount}
+          groundCount={quality.groundCount}
+          reducedMotion={quality.reducedMotion}
+        />
+        <SunFlare reducedMotion={quality.reducedMotion} />
         <Meteors reducedMotion={quality.reducedMotion} />
         <Ready />
       </Suspense>

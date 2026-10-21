@@ -3,7 +3,10 @@
 import { useRef } from "react";
 import { useReveal } from "@/components/ui/useReveal";
 
-/** Opening frame: black sky, centred lockup, "Scroll down". */
+/**
+ * Opening frame: a night launch. The lockup splits around the rocket, which
+ * the camera centres between the two halves.
+ */
 export default function Intro() {
   const root = useRef<HTMLElement>(null);
   useReveal(root, "top bottom");
@@ -13,13 +16,17 @@ export default function Intro() {
       ref={root}
       id="top"
       data-scene="intro"
-      data-label="OPEN SKY"
+      data-label="LAUNCH"
       className="relative flex h-svh min-h-[560px] flex-col items-center justify-center px-5"
     >
-      <div className="reveal-fade flex items-center gap-6 sm:gap-8">
-        <span className="font-sans text-2xl font-semibold tracking-[0.55em] text-ink sm:text-4xl">STELLR</span>
-        <span className="h-10 w-px bg-ink/35 sm:h-14" />
-        <span className="font-mono text-[10px] leading-snug tracking-[0.3em] text-ink/80 sm:text-xs">
+      {/* At the rocket's height (about a quarter down), split around it. */}
+      <div className="reveal-fade absolute inset-x-0 top-[25%] flex items-center justify-center px-5 [@media(max-aspect-ratio:9/10)]:top-[29%]">
+        <span className="flex-1 text-right font-sans text-lg font-semibold tracking-[0.55em] text-ink sm:text-3xl">
+          STELLR
+        </span>
+        {/* The rocket sits in this gap. */}
+        <span aria-hidden className="w-16 shrink-0 sm:w-28" />
+        <span className="flex-1 text-left font-mono text-[9px] leading-snug tracking-[0.3em] text-ink/80 sm:text-xs">
           SPACE TOOLS
           <br />
           FOR THE BROWSER
