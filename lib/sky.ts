@@ -6,6 +6,7 @@ import {
   MoonPhase,
   Observer,
   SearchAltitude,
+  SearchMoonPhase,
   SearchRiseSet,
 } from "astronomy-engine";
 import type { Place } from "./places";
@@ -43,7 +44,16 @@ export interface SkyReport {
   /** The moment the "tonight" view is computed for. */
   at: Date;
   darkNow: boolean;
-  moon: { phaseAngle: number; illuminated: number; name: string; up: boolean; rise: Date | null; set: Date | null };
+  moon: {
+    phaseAngle: number;
+    illuminated: number;
+    name: string;
+    up: boolean;
+    rise: Date | null;
+    set: Date | null;
+    nextFull: Date | null;
+    nextNew: Date | null;
+  };
   sunset: Date | null;
   darkness: Date | null;
   sunrise: Date | null;
@@ -88,6 +98,8 @@ export function computeSky(place: Place, now = new Date()): SkyReport {
       up: altitude(Body.Moon, now) > 0,
       rise: SearchRiseSet(Body.Moon, observer, +1, now, 1)?.date ?? null,
       set: SearchRiseSet(Body.Moon, observer, -1, now, 1)?.date ?? null,
+      nextFull: SearchMoonPhase(180, now, 31)?.date ?? null,
+      nextNew: SearchMoonPhase(0, now, 31)?.date ?? null,
     },
     sunset: SearchRiseSet(Body.Sun, observer, -1, now, 1)?.date ?? null,
     darkness: darkNow ? null : dusk,

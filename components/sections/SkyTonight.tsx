@@ -5,6 +5,7 @@ import { useReveal } from "@/components/ui/useReveal";
 import IndexBar from "@/components/ui/IndexBar";
 import SplitWords from "@/components/ui/SplitWords";
 import ScrambleText from "@/components/ui/ScrambleText";
+import MoonSphere from "@/components/ui/MoonSphere";
 import { CITIES, guessCity, type Place } from "@/lib/places";
 import type { SkyReport } from "@/lib/sky";
 import { appStore } from "@/lib/store";
@@ -16,19 +17,15 @@ function formatTime(date: Date | null, timeZone?: string) {
   return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", timeZone }).format(date);
 }
 
-/** Lit portion of the Moon drawn from the illuminated fraction; waning phases are mirrored. */
-function MoonDisc({ illuminated, waxing }: { illuminated: number; waxing: boolean }) {
-  const r = 46;
-  const c = 50;
-  const rx = Math.abs(2 * illuminated - 1) * r;
-  const sweep = illuminated > 0.5 ? 1 : 0;
-  const lit = `M ${c} ${c - r} A ${r} ${r} 0 0 1 ${c} ${c + r} A ${rx} ${r} 0 0 ${sweep} ${c} ${c - r} Z`;
-  return (
-    <svg viewBox="0 0 100 100" className="h-24 w-24 sm:h-28 sm:w-28" aria-hidden>
-      <circle cx={c} cy={c} r={r} fill="rgb(236 238 242 / 0.07)" stroke="rgb(236 238 242 / 0.2)" strokeWidth="0.6" />
-      <path d={lit} fill="#eceef2" transform={waxing ? undefined : `translate(${2 * c} 0) scale(-1 1)`} />
-    </svg>
-  );
+function formatDay(date: Date | null, timeZone?: string) {
+  if (!date) return "—";
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", timeZone }).format(date).toUpperCase();
+}
+
+function inDays(date: Date | null) {
+  if (!date) return "";
+  const days = Math.round((date.getTime() - Date.now()) / 86_400_000);
+  return days <= 0 ? "TONIGHT" : days === 1 ? "TOMORROW" : `IN ${days} DAYS`;
 }
 
 /** Personal hook: tonight's Moon, darkness and naked-eye planets for the visitor's sky. */
@@ -148,35 +145,64 @@ export default function SkyTonight() {
         <div className="reveal-fade frame mt-8 bg-void/55 backdrop-blur-sm" aria-live="polite">
           {report ? (
             <>
-              <div className="grid gap-6 border-b border-ink/10 p-5 sm:grid-cols-[auto_1fr] sm:p-6">
-                <div className="flex items-center gap-5">
-                  <MoonDisc illuminated={report.moon.illuminated} waxing={report.moon.phaseAngle < 180} />
-                  <div>
-                    <p className="display text-lg text-ink">{report.moon.name}</p>
-                    <p className="mt-2 font-mono text-xs tracking-[0.15em] text-gold">
-                      {Math.round(report.moon.illuminated * 100)}% LIT
-                    </p>
-                  </div>
+              <div className="flex flex-col items-center gap-6 border-b border-ink/10 p-6 sm:flex-row sm:items-center sm:gap-8 sm:p-7">
+                <div className="relative">
+                  <MoonSphere phaseAngle={report.moon.phaseAngle} southern={(place?.lat ?? 0) < 0} size={168} />
+                  <span className="pointer-events-none absolute inset-0 rounded-full shadow-[0_0_60px_rgba(236,238,242,0.08)]" />
                 </div>
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-4 font-mono text-xs sm:justify-self-end">
-                  {[
-                    ["SUNSET", formatTime(report.sunset, tz)],
-                    ["DARK SKY", report.darkNow ? "NOW" : formatTime(report.darkness, tz)],
-                    [
-                      "MOON",
-                      report.moon.up
-                        ? `UP · SETS ${formatTime(report.moon.set, tz)}`
-                        : `RISES ${formatTime(report.moon.rise, tz)}`,
-                    ],
-                    ["SUNRISE", formatTime(report.sunrise, tz)],
-                  ].map(([label, value]) => (
-                    <div key={label}>
-                      <dt className="text-[10px] tracking-[0.2em] text-ink/45">{label}</dt>
-                      <dd className="mt-1.5 tabular-nums tracking-[0.08em] text-ink">{value}</dd>
-                    </div>
-                  ))}
-                </dl>
+
+                <div className="w-full min-w-0 flex-1">
+                  <p className="font-mono text-[10px] tracking-[0.22em] text-ink/45">MOON · TONIGHT</p>
+                  <p className="display mt-3 text-[1.6rem] leading-none text-ink">{report.moon.name}</p>
+
+                  <div className="mt-5 flex items-baseline gap-2">
+                    <span className="display text-[2.6rem] leading-none tabular-nums text-gold">
+                      {Math.round(report.moon.illuminated * 100)}
+                    </span>
+                    <span className="font-mono text-xs tracking-[0.18em] text-gold/80">% LIT</span>
+                  </div>
+                  <div className="mt-3 h-px w-full bg-ink/15">
+                    <div className="h-px bg-gold" style={{ width: `${report.moon.illuminated * 100}%` }} />
+                  </div>
+
+                  <dl className="mt-5 grid grid-cols-2 gap-4 font-mono text-xs">
+                    {[
+                      ["NEXT FULL MOON", report.moon.nextFull],
+                      ["NEXT NEW MOON", report.moon.nextNew],
+                    ].map(([label, date]) => (
+                      <div key={label as string}>
+                        <dt className="text-[10px] tracking-[0.2em] text-ink/45">{label as string}</dt>
+                        <dd className="mt-1.5 tracking-[0.08em] text-ink">
+                          {formatDay(date as Date | null, tz)}
+                          <span className="ml-2 text-ink/45">{inDays(date as Date | null)}</span>
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
               </div>
+
+              <dl className="grid grid-cols-2 border-b border-ink/10 font-mono text-xs sm:grid-cols-4">
+                {[
+                  ["SUNSET", formatTime(report.sunset, tz)],
+                  ["DARK SKY", report.darkNow ? "NOW" : formatTime(report.darkness, tz)],
+                  [
+                    "MOON",
+                    report.moon.up
+                      ? `SETS ${formatTime(report.moon.set, tz)}`
+                      : `RISES ${formatTime(report.moon.rise, tz)}`,
+                  ],
+                  ["SUNRISE", formatTime(report.sunrise, tz)],
+                ].map(([label, value], i) => (
+                  <div
+                    key={label}
+                    className={`p-4 sm:p-5 ${i % 2 === 0 ? "border-r" : ""} ${i < 2 ? "border-b sm:border-b-0" : ""} border-ink/10 sm:[&:not(:last-child)]:border-r`}
+                  >
+                    <dt className="text-[10px] tracking-[0.2em] text-ink/45">{label}</dt>
+                    <dd className="mt-1.5 tabular-nums tracking-[0.08em] text-ink">{value}</dd>
+                  </div>
+                ))}
+              </dl>
 
               <div className="p-5 sm:p-6">
                 <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">
