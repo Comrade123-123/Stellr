@@ -2,9 +2,14 @@
 
 import { useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
+import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { LAUNCH_BASE, rocketAltitude } from "@/lib/launch";
 import { scroll } from "@/lib/scroll";
+
+/** Saturn V from NASA 3D Resources, re-optimised (meshopt + WebP). Repainted plain white below. */
+const MODEL = "/models/saturn-v.glb";
+const ROCKET_HEIGHT = 3;
 
 const NOISE = /* glsl */ `
   float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
@@ -18,93 +23,148 @@ const NOISE = /* glsl */ `
 `;
 
 /*
- * The exhaust plume as tens of thousands of glowing grains. Two populations:
- * the column (needle-thin at the rocket, billowing wide at the pad) and the
- * ground cloud (rolling outward from the pad, mostly to the left). Each grain
- * is lit warm by the engine and the pad's afterglow, cool by moonlight; a few
- * percent glitter. Additive blending makes dense regions read as volume.
+ * The exhaust as billowing smoke: a few thousand large soft puffs. Two kinds:
+ * the column (tight under the engine, swelling as it nears the pad) and the
+ * ground cloud rolling outward across the pad, mostly to the left. Each puff
+ * slowly grows and fades on its own cycle so the smoke keeps churning. Light
+ * comes from the engine flame, the pad's afterglow and cool moonlight.
  */
-const plumeVertex = /* glsl */ `
+const cloudVertex = /* glsl */ `
   attribute vec4 aSeed;
+  attribute float aKind;   // 0 column, 1 ground cloud
   uniform float uTop;
   uniform float uTime;
-  uniform float uPixelRatio;
+  uniform float uScale;    // pixels per world unit at distance 1
   uniform float uOpacity;
   uniform vec3 uBase;
-  varying vec3 vColor;
+  varying vec3 vWarm;
+  varying vec3 vWarmDir;
+  varying vec3 vMoonDir;
+  varying vec3 vEmit;
   varying float vAlpha;
+  varying float vSeed;
+  varying float vDim;
   ${NOISE}
 
   void main() {
     float t = uTime;
+    float dim = 1.0;
+    float phase = fract(aSeed.w * 7.13 + t * 0.03);      // each puff's own swell-and-fade cycle
     vec3 p;
-    float column = step(aSeed.w, 0.5);
-    if (column > 0.5) {
-      float s = pow(aSeed.x, 1.5);                       // denser low down
-      float spread = mix(3.0, 0.05, pow(s, 0.38));       // wide at the pad, a needle at the top
+    float size;
+    float alpha;
+    float heat = 0.0;
+    if (aKind < 0.5) {
+      float s = pow(aSeed.x, 1.25);                       // 0 at the pad, 1 at the engine
+      float top = uTop - 0.25;
+      float spread = mix(2.4, 0.08, pow(s, 0.42));
       float ang = aSeed.y * 6.2831853;
-      float rad = spread * sqrt(aSeed.z);
-      p = vec3(cos(ang) * rad, s * uTop, sin(ang) * rad);
-      p += turb(p * 0.33 + vec3(0.0, -t * 0.22, 0.0)) * spread * 1.5;
+      float rad = spread * sqrt(aSeed.z) * 0.65 * (0.8 + 0.4 * phase);
+      p = vec3(cos(ang) * rad, s * top, sin(ang) * rad);
+      p += turb(p * 0.22 + vec3(0.0, -t * 0.05, aSeed.w)) * spread * 0.9;
+      size = mix(3.0, 0.32, pow(s, 0.55)) * (0.75 + 0.5 * phase) * mix(0.8, 1.25, fract(aSeed.y * 7.7));
+      alpha = 0.6;
+      heat = smoothstep(0.86, 1.0, s);
     } else {
-      float side = aSeed.y < 0.64 ? -1.0 : 1.0;          // the cloud leans left, like a crosswind
-      float d = pow(aSeed.x, 0.9) * 13.0;
-      float h = mix(4.2, 0.5, smoothstep(0.0, 13.0, d));
-      p = vec3(side * d, pow(fract(aSeed.z * 7.31), 1.7) * h, (aSeed.z - 0.5) * (3.0 + d * 0.7));
-      p += turb(p * 0.26 + vec3(t * 0.06 * side, -t * 0.05, 0.0)) * vec3(2.6, 1.5, 2.2);
-      p.y = max(p.y, 0.02);
+      float side = aSeed.y < 0.62 ? -1.0 : 1.0;           // the cloud leans left, like a crosswind
+      float d = pow(aSeed.x, 0.8) * 15.0 + phase * 1.6;
+      float h = mix(4.2, 0.6, smoothstep(0.0, 16.0, d)) * (0.55 + 0.9 * noise(vec3(d * 0.25, side * 3.0, aSeed.w * 2.0)));
+      size = mix(4.4, 2.6, smoothstep(0.0, 16.0, d)) * (0.75 + 0.5 * fract(aSeed.z * 5.3));
+      p = vec3(side * d, fract(aSeed.z * 7.31) * h * 0.75 + size * 0.28, (aSeed.z - 0.5) * (4.0 + d * 0.8));
+      p += turb(p * 0.15 + vec3(t * 0.02 * side, 0.0, aSeed.w * 3.0)) * vec3(2.0, 0.9, 1.8);
+      alpha = 0.5;
+      dim = mix(1.0, 0.4, smoothstep(3.0, 17.0, d));   // the cloud's far reaches sink into the dark
     }
+    alpha *= smoothstep(0.0, 0.25, phase) * (1.0 - smoothstep(0.7, 1.0, phase)) * 0.75 + 0.25;
 
     vec4 mv = viewMatrix * vec4(uBase + p, 1.0);
     gl_Position = projectionMatrix * mv;
+    gl_PointSize = clamp(size * uScale / -mv.z, 1.0, 900.0);
 
-    float glitter = step(0.955, fract(aSeed.x * 91.7 + aSeed.y * 13.1));
-    float size = mix(0.9, 2.4, fract(aSeed.z * 37.1)) * mix(1.0, 0.65, glitter);
-    gl_PointSize = max(1.0, size * uPixelRatio * (115.0 / -mv.z));
-
-    // Light: the engine at the top of the column, the pad's afterglow at the base, cool moonlight.
-    float toEngine = length(p - vec3(0.0, uTop, 0.0));
-    float engine = 1.0 / (1.0 + toEngine * toEngine * 0.08);
-    float pad = exp(-length(p) * 0.16);
-    vec3 moon = vec3(0.42, 0.47, 0.56);
-    vColor = moon * (0.55 + 0.45 * aSeed.z) + vec3(1.0, 0.72, 0.42) * (engine * 2.2 + pad * 0.5);
-    float twinkle = 0.55 + 0.45 * sin(t * 3.0 + aSeed.x * 60.0);
-    vAlpha = mix(0.2, 0.9 * twinkle, glitter) * uOpacity;
+    // Warm light from the flame just under the engine and the pad's glow.
+    vec3 flame = vec3(0.0, uTop - 0.35, 0.0);
+    vec3 toFlame = flame - p;
+    float engine = 5.5 / (1.0 + dot(toFlame, toFlame) * 0.09);
+    vec3 pad = vec3(0.0, 0.6, 0.0);
+    float glow = 1.4 * exp(-length(p - pad) * 0.17);
+    vec3 warmDir = normalize(toFlame * engine + (pad - p) * glow + vec3(0.0, 0.0, 0.001));
+    vWarm = vec3(1.0, 0.66, 0.36) * (engine + glow);
+    vWarmDir = normalize((viewMatrix * vec4(warmDir, 0.0)).xyz);
+    vMoonDir = normalize((viewMatrix * vec4(-0.45, 0.8, 0.4, 0.0)).xyz);
+    vEmit = vec3(1.0, 0.78, 0.5) * heat * 2.6;
+    vAlpha = alpha * uOpacity;
+    vSeed = aSeed.w;
+    vDim = dim;
   }
 `;
 
-const pointFragment = /* glsl */ `
-  varying vec3 vColor;
+const cloudFragment = /* glsl */ `
+  varying vec3 vWarm;
+  varying vec3 vWarmDir;
+  varying vec3 vMoonDir;
+  varying vec3 vEmit;
   varying float vAlpha;
+  varying float vSeed;
+  varying float vDim;
+
+  float h2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float n2(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(h2(i), h2(i + vec2(1, 0)), f.x), mix(h2(i + vec2(0, 1)), h2(i + vec2(1, 1)), f.x), f.y);
+  }
+  float fbm(vec2 p) {
+    float v = 0.0, a = 0.5;
+    for (int i = 0; i < 4; i++) { v += a * n2(p); p = p * 2.03 + 7.1; a *= 0.5; }
+    return v;
+  }
+
   void main() {
-    float d = length(gl_PointCoord - 0.5) * 2.0;
-    float a = exp(-d * d * 4.0) * vAlpha;
-    gl_FragColor = vec4(vColor * a, a);
+    vec2 c = gl_PointCoord * 2.0 - 1.0;
+    c.y = -c.y;
+    float r2 = dot(c, c);
+    if (r2 > 1.0) discard;
+    float f = fbm(c * 2.1 + vSeed * 41.0);
+    // A cauliflower edge: the disc's falloff broken up by the noise.
+    float shape = (1.0 - r2) * (0.45 + 1.1 * f);
+    float a = smoothstep(0.08, 0.5, shape) * vAlpha;
+    if (a < 0.003) discard;
+
+    // Shade each puff as a lumpy ball.
+    vec3 n = normalize(vec3(c * 1.15 + (f - 0.5) * 0.9, sqrt(max(0.0, 1.0 - r2)) + 0.15));
+    float warm = clamp(dot(n, vWarmDir) * 0.6 + 0.4, 0.0, 1.0);
+    float moon = clamp(dot(n, vMoonDir) * 0.5 + 0.5, 0.0, 1.0);
+    vec3 albedo = vec3(0.8, 0.79, 0.78) * (0.7 + 0.45 * f);
+    vec3 col = albedo * (vec3(0.03, 0.035, 0.05) + vec3(0.3, 0.35, 0.46) * moon * 0.4 * vDim + vWarm * warm)
+             + vEmit * (0.55 + 0.6 * f);
+    gl_FragColor = vec4(col * a, a);
+    // Tone-mapped here only when drawing straight to the screen (no post-processing), matching the composer's look.
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }
 `;
 
-/* Ground as flowing rows of fine points, lit by the pad and fading into the dark. */
+/* Dark ground under the pad, warmed by the plume's glow, fading out toward the horizon. */
 const groundVertex = /* glsl */ `
-  attribute vec2 aGrid;   // x along the row, row index (0..1 near→far)
-  uniform float uPixelRatio;
-  uniform float uOpacity;
-  uniform vec3 uBase;
-  uniform float uTime;
-  varying vec3 vColor;
-  varying float vAlpha;
-  ${NOISE}
-
+  varying vec3 vLocal;
   void main() {
-    float z = mix(26.0, -40.0, pow(aGrid.y, 0.8));
-    float x = aGrid.x;
-    float y = (noise(vec3(x * 0.08, 0.0, z * 0.08)) - 0.5) * 1.6 + sin(x * 0.11 + z * 0.23) * 0.22;
-    vec3 p = vec3(x + sin(z * 0.05) * 3.0, y, z);
-    vec4 mv = viewMatrix * vec4(uBase + p, 1.0);
-    gl_Position = projectionMatrix * mv;
-    gl_PointSize = max(1.0, uPixelRatio * (60.0 / -mv.z));
-    float glow = exp(-length(p.xz) * 0.09);
-    vColor = vec3(0.45, 0.5, 0.58) * 0.5 + vec3(1.0, 0.72, 0.45) * glow * 1.2;
-    vAlpha = (0.32 + 0.6 * glow) * uOpacity * smoothstep(-40.0, -20.0, z);
+    vLocal = position.xzy * vec3(1.0, 1.0, -1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+const groundFragment = /* glsl */ `
+  uniform float uOpacity;
+  varying vec3 vLocal;
+  ${NOISE}
+  void main() {
+    float d = length(vLocal.xz);
+    float grain = noise(vLocal * 0.6) * 0.6 + noise(vLocal * 3.1) * 0.4;
+    vec3 col = vec3(0.016, 0.018, 0.024) * (0.7 + 0.6 * grain)
+             + vec3(1.0, 0.55, 0.25) * exp(-d * 0.15) * 0.22 * (0.75 + 0.5 * grain);
+    float fade = smoothstep(-70.0, -30.0, vLocal.z) * (1.0 - smoothstep(45.0, 70.0, abs(vLocal.x)));
+    gl_FragColor = vec4(col, fade * uOpacity);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }
 `;
 
@@ -130,28 +190,55 @@ const flareFragment = /* glsl */ `
   }
 `;
 
-function usePointMaterial(vertex: string) {
-  return useMemo(
-    () =>
-      new THREE.ShaderMaterial({
-        vertexShader: vertex,
-        fragmentShader: pointFragment,
-        uniforms: {
-          uTop: { value: 12 },
-          uTime: { value: 0 },
-          uPixelRatio: { value: 1 },
-          uOpacity: { value: 1 },
-          uBase: { value: LAUNCH_BASE },
-        },
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      }),
-    [vertex],
-  );
+/** The NASA model, scaled so its engines sit at the origin, repainted as a plain white launcher. */
+function Rocket() {
+  const { scene } = useGLTF(MODEL, false, true);
+  const model = useMemo(() => {
+    const root = scene.clone(true);
+    const box = new THREE.Box3().setFromObject(root);
+    const centre = box.getCenter(new THREE.Vector3());
+    const scale = ROCKET_HEIGHT / (box.max.y - box.min.y);
+    root.scale.setScalar(scale);
+    root.position.set(-centre.x * scale, -box.min.y * scale, -centre.z * scale);
+
+    // The livery's black roll pattern stays; the blue band, flags and lettering go white.
+    const painted = new Map<THREE.Material, THREE.Material>();
+    const paint = (source: THREE.Material) => {
+      let m = painted.get(source);
+      if (!m) {
+        const map = (source as THREE.MeshStandardMaterial).map ?? null;
+        const mat = new THREE.MeshStandardMaterial({ map, roughness: 0.5, metalness: 0.05 });
+        mat.onBeforeCompile = (shader) => {
+          shader.fragmentShader = shader.fragmentShader.replace(
+            "#include <map_fragment>",
+            /* glsl */ `#include <map_fragment>
+            float paint = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+            diffuseColor.rgb = vec3(mix(0.03, 0.85, smoothstep(0.012, 0.035, paint)));`,
+          );
+        };
+        m = mat;
+        painted.set(source, m);
+      }
+      return m;
+    };
+    const engines = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.09, 0.085, 0.08), roughness: 0.4, metalness: 0.7 });
+
+    root.traverse((o) => {
+      if (!(o as THREE.Mesh).isMesh) return;
+      const mesh = o as THREE.Mesh;
+      const isEngine = /^polySurf/.test(mesh.name) || /^polySurf/.test(mesh.parent?.name ?? "");
+      mesh.material = isEngine ? engines : paint(mesh.material as THREE.Material);
+      mesh.frustumCulled = false;
+    });
+    return root;
+  }, [scene]);
+
+  return <primitive object={model} />;
 }
 
-/** A night launch: rocket, glowing particle plume and particle ground. Shown in the Intro, gone by the Hero. */
+useGLTF.preload(MODEL, false, true);
+
+/** A night launch: the rocket on a column of billowing smoke. Shown in the Intro, gone by the Hero. */
 export default function LaunchScene({
   plumeCount,
   groundCount,
@@ -164,37 +251,70 @@ export default function LaunchScene({
   const group = useRef<THREE.Group>(null);
   const rocket = useRef<THREE.Group>(null);
   const flare = useRef<THREE.Mesh>(null);
-  const camera = useThree((s) => s.camera);
-  const pixelRatio = useThree((s) => s.viewport.dpr);
+  const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
+  const gl = useThree((s) => s.gl);
+  const moonTarget = useMemo(() => new THREE.Object3D(), []);
 
-  const plumeGeometry = useMemo(() => {
-    const seeds = new Float32Array(plumeCount * 4);
-    for (let i = 0; i < seeds.length; i++) seeds[i] = Math.random();
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(plumeCount * 3), 3));
-    g.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 4));
-    return g;
-  }, [plumeCount]);
-
-  const groundGeometry = useMemo(() => {
-    const rows = Math.round(Math.sqrt(groundCount / 3));
-    const perRow = Math.round(groundCount / rows);
-    const grid = new Float32Array(rows * perRow * 2);
-    let k = 0;
-    for (let r = 0; r < rows; r++) {
-      for (let i = 0; i < perRow; i++) {
-        grid[k++] = -55 + (i / perRow) * 110 + (Math.random() - 0.5) * 0.35;
-        grid[k++] = (r + Math.random() * 0.4) / rows;
+  const cloudGeometry = useMemo(() => {
+    const count = plumeCount + groundCount;
+    // Rough depth of each puff, so they can be drawn back to front (the camera looks down −z).
+    const puffs = Array.from({ length: count }, (_, i) => {
+      const seed = [Math.random(), Math.random(), Math.random(), Math.random()];
+      const kind = i < plumeCount ? 0 : 1;
+      let z: number;
+      if (kind === 0) {
+        const spread = 2.4 + (0.08 - 2.4) * Math.pow(Math.pow(seed[0], 1.25), 0.42);
+        z = Math.sin(seed[1] * Math.PI * 2) * spread * Math.sqrt(seed[2]) * 0.65;
+      } else {
+        z = (seed[2] - 0.5) * (4 + Math.pow(seed[0], 0.8) * 15 * 0.8);
       }
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(rows * perRow * 3), 3));
-    g.setAttribute("aGrid", new THREE.BufferAttribute(grid, 2));
-    return g;
-  }, [groundCount]);
+      return { seed, kind, z };
+    }).sort((a, b) => a.z - b.z);
 
-  const plume = usePointMaterial(plumeVertex);
-  const ground = usePointMaterial(groundVertex);
+    const seeds = new Float32Array(count * 4);
+    const kinds = new Float32Array(count);
+    puffs.forEach((p, i) => {
+      seeds.set(p.seed, i * 4);
+      kinds[i] = p.kind;
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+    g.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 4));
+    g.setAttribute("aKind", new THREE.BufferAttribute(kinds, 1));
+    return g;
+  }, [plumeCount, groundCount]);
+
+  const cloud = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: cloudVertex,
+        fragmentShader: cloudFragment,
+        uniforms: {
+          uTop: { value: 12 },
+          uTime: { value: 0 },
+          uScale: { value: 500 },
+          uOpacity: { value: 1 },
+          uBase: { value: LAUNCH_BASE },
+        },
+        transparent: true,
+        depthWrite: false,
+        premultipliedAlpha: true,
+        blending: THREE.NormalBlending,
+      }),
+    [],
+  );
+
+  const ground = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: groundVertex,
+        fragmentShader: groundFragment,
+        uniforms: { uOpacity: { value: 1 } },
+        transparent: true,
+        depthWrite: false,
+      }),
+    [],
+  );
 
   const flareMaterial = useMemo(
     () =>
@@ -209,7 +329,8 @@ export default function LaunchScene({
       }),
     [],
   );
-  const hull = useMemo(() => new THREE.MeshBasicMaterial({ color: new THREE.Color(0.05, 0.05, 0.06) }), []);
+
+  const buffer = useMemo(() => new THREE.Vector2(), []);
 
   useFrame(({ clock }) => {
     const j = scroll.journey;
@@ -221,18 +342,18 @@ export default function LaunchScene({
 
     const time = reducedMotion ? 0 : clock.elapsedTime;
     const top = rocketAltitude(j) + (reducedMotion ? 0 : Math.sin(time * 0.6) * 0.05);
-    for (const m of [plume, ground]) {
-      m.uniforms.uTop.value = top;
-      m.uniforms.uTime.value = time;
-      m.uniforms.uPixelRatio.value = pixelRatio;
-      m.uniforms.uOpacity.value = presence;
-    }
+    gl.getDrawingBufferSize(buffer);
+    cloud.uniforms.uTop.value = top;
+    cloud.uniforms.uTime.value = time;
+    cloud.uniforms.uScale.value = camera.projectionMatrix.elements[5] * buffer.y * 0.5;
+    cloud.uniforms.uOpacity.value = presence;
+    ground.uniforms.uOpacity.value = presence;
     flareMaterial.uniforms.uOpacity.value = presence;
     flareMaterial.uniforms.uTime.value = time;
 
     if (rocket.current) rocket.current.position.set(LAUNCH_BASE.x, LAUNCH_BASE.y + top, LAUNCH_BASE.z);
     if (flare.current) {
-      flare.current.position.set(LAUNCH_BASE.x, LAUNCH_BASE.y + top - 0.05, LAUNCH_BASE.z);
+      flare.current.position.set(LAUNCH_BASE.x, LAUNCH_BASE.y + top - 0.03, LAUNCH_BASE.z);
       flare.current.quaternion.copy(camera.quaternion);
       const dist = camera.position.distanceTo(flare.current.position);
       flare.current.scale.set(dist * 0.6, dist * 0.075, 1);
@@ -241,17 +362,19 @@ export default function LaunchScene({
 
   return (
     <group ref={group}>
-      <points geometry={groundGeometry} material={ground} frustumCulled={false} />
-      <points geometry={plumeGeometry} material={plume} frustumCulled={false} />
+      <mesh material={ground} position={LAUNCH_BASE} rotation={[-Math.PI / 2, 0, 0]} renderOrder={-1}>
+        <planeGeometry args={[150, 150]} />
+      </mesh>
+      <points geometry={cloudGeometry} material={cloud} frustumCulled={false} renderOrder={2} />
 
-      {/* A slim launcher: body, interstage band and nose, seen as a silhouette against its own light. */}
       <group ref={rocket}>
-        <mesh material={hull} position={[0, 1.0, 0]}>
-          <cylinderGeometry args={[0.055, 0.06, 1.9, 12]} />
-        </mesh>
-        <mesh material={hull} position={[0, 2.18, 0]}>
-          <coneGeometry args={[0.055, 0.45, 12]} />
-        </mesh>
+        <Rocket />
+        {/* The flame lights the body from below, the bright smoke fills it from the front, moonlight from above. */}
+        <pointLight position={[0, -0.5, 0.5]} color="#ffc89a" intensity={8} distance={8} decay={2} />
+        <directionalLight position={[0.6, -0.4, 3]} target={moonTarget} color="#fff1e2" intensity={1.4} />
+        <primitive object={moonTarget} />
+        <directionalLight position={[-3, 4, 3]} target={moonTarget} color="#b4c4e2" intensity={0.8} />
+        <ambientLight intensity={0.05} />
       </group>
       <mesh ref={flare} material={flareMaterial} renderOrder={5} frustumCulled={false}>
         <planeGeometry args={[1, 1]} />

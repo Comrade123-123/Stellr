@@ -62,6 +62,13 @@ export default function Footer() {
               CC BY 4.0
             </a>
           </span>
+          <span className="block">
+            SATURN V MODEL BY{" "}
+            <a href="https://science.nasa.gov/3d-resources/" target="_blank" rel="noreferrer" className={linkClass}>
+              NASA 3D RESOURCES
+            </a>
+            , REPAINTED · NO ENDORSEMENT IMPLIED
+          </span>
         </span>
       </div>
     </footer>
