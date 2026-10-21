@@ -33,6 +33,10 @@ const starFragment = /* glsl */ `
   }
 `;
 
+/** Orientation and tint of the Milky Way backdrop; the black hole lenses the same sky. */
+export const SKY_ROTATION = new THREE.Euler(0.5, 0.3, -1.05);
+export const SKY_TINT = new THREE.Color(0.22, 0.22, 0.25);
+
 const PALETTE = [
   new THREE.Color("#ffffff"),
   new THREE.Color("#dfe8ff"),
@@ -95,7 +99,7 @@ export default function Starfield({ count, reducedMotion }: StarfieldProps) {
     sky.colorSpace = THREE.SRGBColorSpace;
     return new THREE.MeshBasicMaterial({
       map: sky,
-      color: new THREE.Color(0.22, 0.22, 0.25),
+      color: SKY_TINT,
       side: THREE.BackSide,
       depthWrite: false,
       toneMapped: false,
@@ -110,7 +114,7 @@ export default function Starfield({ count, reducedMotion }: StarfieldProps) {
 
   return (
     <group ref={group}>
-      <mesh material={skyMaterial} rotation={[0.5, 0.3, -1.05]} renderOrder={-2}>
+      <mesh material={skyMaterial} rotation={SKY_ROTATION} renderOrder={-2}>
         <sphereGeometry args={[1600, 48, 32]} />
       </mesh>
       <points geometry={geometry} material={material} frustumCulled={false} renderOrder={-1} />

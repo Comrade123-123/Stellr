@@ -2,9 +2,11 @@
 
 import { useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
+import { useTexture } from "@react-three/drei";
 import * as THREE from "three";
 import { BLACK_HOLE_DIRECTION, BLACK_HOLE_DIRECTION_TALL } from "@/lib/outpost";
 import { scroll, sceneIndex } from "@/lib/scroll";
+import { SKY_ROTATION, SKY_TINT } from "./Starfield";
 
 const DISTANCE = 1450; // inside the far plane, behind the starfield shell
 
@@ -34,6 +36,9 @@ const fragment = /* glsl */ `
   uniform float uTime;
   uniform float uOpacity;
   uniform float uShadow;   // angular radius (gnomonic units)
+  uniform sampler2D uSky;  // the same Milky Way image the backdrop uses
+  uniform mat3 uSkyInv;    // world → backdrop-local rotation
+  uniform vec3 uSkyTint;
   varying vec3 vWorld;
 
   float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
@@ -44,6 +49,24 @@ const fragment = /* glsl */ `
                mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
   }
   float fbm(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 4; i++) { s += a * noise(p); p *= 2.03; a *= 0.5; } return s; }
+
+  // The sky in a given direction: the Milky Way image (same mapping as the backdrop
+  // sphere) plus fine procedural stars, so lensed light is the real background.
+  vec3 skyColor(vec3 dir) {
+    vec3 d = uSkyInv * dir;
+    float theta = acos(clamp(d.y, -1.0, 1.0));
+    float phi = atan(d.z, -d.x);
+    if (phi < 0.0) phi += 6.2831853;
+    vec3 mw = texture2D(uSky, vec2(phi / 6.2831853, 1.0 - theta / 3.14159265)).rgb * uSkyTint;
+    vec3 c = dir * 420.0;
+    float h = hash(floor(c));
+    float star = 0.0;
+    if (h > 0.988) {
+      vec3 f = fract(c) - 0.5;
+      star = exp(-dot(f, f) * 60.0) * pow((h - 0.988) / 0.012, 2.0) * 3.2;
+    }
+    return mw * 2.2 + vec3(star) * vec3(1.0, 0.94, 0.86);
+  }
 
   // Disk emission at disk radius R and orbital angle a: hot inner edge, streaky gas,
   // inner gas orbiting faster, approaching side brighter.
@@ -88,6 +111,19 @@ const fragment = /* glsl */ `
 
     vec3 col = vec3(0.0);
 
+    // Gravitational lensing of the background: light passing close to the hole is
+    // bent, so each pixel shows the sky from a direction pulled toward the centre
+    // (point-lens mapping, source = image·(1 − 1/r²)). Stars and the Milky Way
+    // smear into arcs and pile up into a bright Einstein ring near the shadow.
+    float lens = smoothstep(9.0, 2.4, r) * step(0.985, r);
+    if (lens > 0.001) {
+      vec2 s = p * (1.0 - 1.0 / (r * r));
+      s = mat2(cos(roll), sin(roll), -sin(roll), cos(roll)) * s; // undo the roll
+      vec3 src = normalize(D + (s.x * R + s.y * U) * uShadow);
+      vec3 bg = skyColor(src) * (1.0 + 2.2 * exp(-pow((r - 1.18) / 0.16, 2.0)));
+      col += bg * lens;
+    }
+
     // Far half of the disk, where it peeks out beside the shadow.
     vec2 dp = vec2(p.x, p.y / k);
     float Rd = length(dp);
@@ -123,8 +159,10 @@ const fragment = /* glsl */ `
     // Warm haze around the whole system.
     col += vec3(1.0, 0.55, 0.22) * 0.05 * exp(-max(r - 1.0, 0.0) * 0.4) * (1.0 - shadow);
 
-    float alpha = clamp(max(max(shadow, front), dot(col, vec3(0.3, 0.5, 0.2))), 0.0, 1.0);
+    // Inside the lensing zone the bent sky replaces the real stars behind it.
+    float alpha = clamp(max(max(max(shadow, front), lens), dot(col, vec3(0.3, 0.5, 0.2))), 0.0, 1.0);
     gl_FragColor = vec4(col, alpha) * uOpacity; // premultiplied
+    #include <colorspace_fragment>
   }
 `;
 
@@ -138,10 +176,12 @@ export default function BlackHole({ reducedMotion }: { reducedMotion: boolean })
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const size = useThree((s) => s.size);
   const sky = sceneIndex("sky");
+  const milkyWay = useTexture("/textures/2k_stars_milky_way.jpg");
 
-  const material = useMemo(
-    () =>
-      new THREE.ShaderMaterial({
+  const material = useMemo(() => {
+    milkyWay.colorSpace = THREE.SRGBColorSpace;
+    const skyInverse = new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromEuler(SKY_ROTATION).invert());
+    return new THREE.ShaderMaterial({
         vertexShader: vertex,
         fragmentShader: fragment,
         uniforms: {
@@ -149,6 +189,9 @@ export default function BlackHole({ reducedMotion }: { reducedMotion: boolean })
           uTime: { value: 0 },
           uOpacity: { value: 1 },
           uShadow: { value: 0.075 },
+          uSky: { value: milkyWay },
+          uSkyInv: { value: skyInverse },
+          uSkyTint: { value: SKY_TINT },
         },
         transparent: true,
         premultipliedAlpha: true,
@@ -156,9 +199,8 @@ export default function BlackHole({ reducedMotion }: { reducedMotion: boolean })
         blendSrc: THREE.OneFactor,
         blendDst: THREE.OneMinusSrcAlphaFactor,
         depthWrite: false,
-      }),
-    [],
-  );
+      });
+  }, [milkyWay]);
 
   const fwd = useMemo(() => new THREE.Vector3(), []);
 
