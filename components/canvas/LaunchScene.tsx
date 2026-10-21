@@ -49,7 +49,7 @@ const cloudVertex = /* glsl */ `
   void main() {
     float t = uTime;
     float dim = 1.0;
-    float phase = fract(aSeed.w * 7.13 + t * 0.03);      // each puff's own swell-and-fade cycle
+    float phase = fract(aSeed.w * 7.13 + t * 0.11);      // each puff's own swell-and-fade cycle
     vec3 p;
     float size;
     float alpha;
@@ -60,22 +60,23 @@ const cloudVertex = /* glsl */ `
       float spread = mix(2.4, 0.08, pow(s, 0.42));
       float ang = aSeed.y * 6.2831853;
       float rad = spread * sqrt(aSeed.z) * 0.65 * (0.8 + 0.4 * phase);
-      p = vec3(cos(ang) * rad, s * top, sin(ang) * rad);
-      p += turb(p * 0.22 + vec3(0.0, -t * 0.05, aSeed.w)) * spread * 0.9;
+      // Each puff is pushed down and outward by the exhaust as it swells.
+      p = vec3(cos(ang) * rad, s * top - phase * mix(1.6, 0.5, s), sin(ang) * rad);
+      p += turb(p * 0.22 + vec3(0.0, t * 0.35, aSeed.w)) * spread * 0.9;
       size = mix(3.0, 0.32, pow(s, 0.55)) * (0.75 + 0.5 * phase) * mix(0.8, 1.25, fract(aSeed.y * 7.7));
-      alpha = 0.6;
+      alpha = 0.75;
       heat = smoothstep(0.86, 1.0, s);
     } else {
       float side = aSeed.y < 0.62 ? -1.0 : 1.0;           // the cloud leans left, like a crosswind
-      float d = pow(aSeed.x, 0.8) * 15.0 + phase * 1.6;
+      float d = pow(aSeed.x, 0.8) * 15.0 + phase * 4.0;      // rolling outward
       float h = mix(4.2, 0.6, smoothstep(0.0, 16.0, d)) * (0.55 + 0.9 * noise(vec3(d * 0.25, side * 3.0, aSeed.w * 2.0)));
       size = mix(4.4, 2.6, smoothstep(0.0, 16.0, d)) * (0.75 + 0.5 * fract(aSeed.z * 5.3));
       p = vec3(side * d, fract(aSeed.z * 7.31) * h * 0.75 + size * 0.28, (aSeed.z - 0.5) * (4.0 + d * 0.8));
-      p += turb(p * 0.15 + vec3(t * 0.02 * side, 0.0, aSeed.w * 3.0)) * vec3(2.0, 0.9, 1.8);
-      alpha = 0.5;
+      p += turb(p * 0.15 + vec3(t * 0.12 * side, t * 0.05, aSeed.w * 3.0)) * vec3(2.0, 0.9, 1.8);
+      alpha = 0.65;
       dim = mix(1.0, 0.4, smoothstep(3.0, 17.0, d));   // the cloud's far reaches sink into the dark
     }
-    alpha *= smoothstep(0.0, 0.25, phase) * (1.0 - smoothstep(0.7, 1.0, phase)) * 0.75 + 0.25;
+    alpha *= smoothstep(0.0, 0.2, phase) * (1.0 - smoothstep(0.65, 1.0, phase));   // fully faded when a puff restarts, so nothing pops
 
     vec4 mv = viewMatrix * vec4(uBase + p, 1.0);
     gl_Position = projectionMatrix * mv;
