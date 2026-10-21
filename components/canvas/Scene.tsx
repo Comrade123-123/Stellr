@@ -7,9 +7,11 @@ import { DefaultLoadingManager } from "three";
 import { getQuality } from "@/lib/quality";
 import { scroll } from "@/lib/scroll";
 import { appStore, useAppStore } from "@/lib/store";
+import AsteroidField from "./AsteroidField";
 import CameraRig from "./CameraRig";
 import Earth from "./Earth";
 import Effects from "./Effects";
+import Meteors from "./Meteors";
 import Orbits from "./Orbits";
 import SolarSystem from "./SolarSystem";
 import Starfield from "./Starfield";
@@ -95,6 +97,8 @@ export default function Scene() {
         <Starfield count={degraded ? Math.round(quality.starCount / 2) : quality.starCount} reducedMotion={quality.reducedMotion} />
         <Earth segments={quality.sphereSegments} reducedMotion={quality.reducedMotion} />
         <Orbits reducedMotion={quality.reducedMotion} />
+        <AsteroidField count={quality.asteroidCount} reducedMotion={quality.reducedMotion} />
+        <Meteors reducedMotion={quality.reducedMotion} />
         <Ready />
       </Suspense>
       {/* Loads after first paint and never holds up the loader. */}

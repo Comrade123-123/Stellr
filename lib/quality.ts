@@ -8,13 +8,14 @@ export interface Quality {
   postprocessing: boolean;
   multisampling: number;
   starCount: number;
+  asteroidCount: number;
   sphereSegments: number;
 }
 
 const PRESETS: Record<Tier, Omit<Quality, "tier" | "reducedMotion" | "isMobile">> = {
-  high: { dpr: [1, 1.75], postprocessing: true, multisampling: 4, starCount: 9000, sphereSegments: 128 },
-  medium: { dpr: [1, 1.5], postprocessing: true, multisampling: 0, starCount: 5000, sphereSegments: 96 },
-  low: { dpr: [1, 1.25], postprocessing: false, multisampling: 0, starCount: 2500, sphereSegments: 64 },
+  high: { dpr: [1, 1.75], postprocessing: true, multisampling: 4, starCount: 9000, asteroidCount: 40, sphereSegments: 128 },
+  medium: { dpr: [1, 1.5], postprocessing: true, multisampling: 0, starCount: 5000, asteroidCount: 30, sphereSegments: 96 },
+  low: { dpr: [1, 1.25], postprocessing: false, multisampling: 0, starCount: 2500, asteroidCount: 14, sphereSegments: 64 },
 };
 
 const SOFTWARE_GPU = /swiftshader|llvmpipe|software|basic render|mali-4|adreno \(tm\) [1-4]\d\d/i;
