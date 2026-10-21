@@ -4,11 +4,11 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { scroll } from "@/lib/scroll";
-import { SUN_DIRECTION } from "@/lib/solar";
+import { OUTPOST_EYE } from "@/lib/outpost";
 
-/** Volume the rocks drift through: the open sky the Intro and Hero cameras look into. */
-const CENTER = new THREE.Vector3(0, 4.2, -3.4);
-const HALF = new THREE.Vector3(7.5, 3.8, 3.6);
+/** Volume the rocks drift through: the open sky above the outpost the Intro and Hero cameras look into. */
+const CENTER = OUTPOST_EYE.clone().add(new THREE.Vector3(2, 7, -14));
+const HALF = new THREE.Vector3(14, 7, 9);
 const SHAPES = 3;
 
 // Deterministic pseudo-random so the field looks the same on every load.
@@ -66,12 +66,12 @@ export default function AsteroidField({ count, reducedMotion }: { count: number;
           CENTER.y + (rand() * 2 - 1) * HALF.y,
           CENTER.z + (rand() * 2 - 1) * HALF.z,
         ),
-        velocity: new THREE.Vector3(0.05 + rand() * 0.12, -0.01 - rand() * 0.02, (rand() - 0.5) * 0.04),
+        velocity: new THREE.Vector3(0.12 + rand() * 0.28, -0.02 - rand() * 0.05, (rand() - 0.5) * 0.1),
         axis: new THREE.Vector3(rand() - 0.5, rand() - 0.5, rand() - 0.5).normalize(),
         spin: 0.1 + rand() * 0.5,
         angle: rand() * Math.PI * 2,
         // Mostly pebbles, a few larger boulders.
-        scale: 0.03 + Math.pow(rand(), 3) * 0.16,
+        scale: 0.07 + Math.pow(rand(), 3) * 0.34,
       });
     }
     return {
@@ -111,9 +111,7 @@ export default function AsteroidField({ count, reducedMotion }: { count: number;
 
   return (
     <group ref={group}>
-      {/* Sunlight for the rocks only; Earth and the sky use their own shaders. */}
-      <directionalLight position={SUN_DIRECTION.clone().multiplyScalar(10)} intensity={2.4} />
-      <ambientLight intensity={0.06} />
+      {/* Lit by the Outpost's disk light, which shares this window of the journey. */}
       {rocks.map((set, k) => (
         <instancedMesh
           key={k}

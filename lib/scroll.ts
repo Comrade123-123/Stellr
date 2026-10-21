@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { OUTPOST_EYE, OUTPOST_EYE_TALL, lookFrom, lookFromEye } from "./outpost";
 import { ORBIT_PLANE, SUN_POSITION } from "./solar";
 
 /**
@@ -55,7 +56,6 @@ interface Waypoint {
   tall: Pose;
 }
 
-/** One waypoint per `data-scene` section, in page order. */
 /** A pose expressed in the orbital plane's frame: offsets from the Sun along Sun→Earth, north and prograde. */
 function inOrbitFrame(target: [number, number, number], eye: [number, number, number]): Pose {
   const toWorld = (v: [number, number, number]) =>
@@ -63,18 +63,24 @@ function inOrbitFrame(target: [number, number, number], eye: [number, number, nu
   return { target: toWorld(target), position: toWorld(eye) };
 }
 
+const EYE = OUTPOST_EYE.toArray() as Vec3;
+const EYE_TALL = OUTPOST_EYE_TALL.toArray() as Vec3;
+
+/** One waypoint per `data-scene` section, in page order. */
 export const CAMERA_PATH: Waypoint[] = [
   {
     id: "intro",
-    // Looking up into open sky; Earth is just below the frame.
-    wide: { position: [0, 0.2, 2.3], target: [0, 7, -2.5] },
-    tall: { position: [0, 0.2, 2.7], target: [0, 8, -2.5] },
+    // Standing on the outpost planetoid, looking up into open sky; the black hole is below the frame.
+    wide: { position: EYE, target: lookFromEye([0.12, 0.92, -0.4]) },
+    tall: { position: EYE_TALL, target: lookFrom(OUTPOST_EYE_TALL, [0.25, 0.92, -0.4]) },
   },
   {
     id: "hero",
-    // Tilt down: Earth's limb rises across the lower half of the screen.
-    wide: { position: [0, 0.05, 2.15], target: [0, 1.55, 0] },
-    tall: { position: [0, 0.05, 2.7], target: [0, 1.74, 0] },
+    // Tilt down to the horizon: the black hole rises centre-right over the astronaut.
+    wide: { position: EYE, target: lookFromEye([0.1, -0.05, -1]) },
+    // Portrait: lower eye, pitched up so the headline gets dark sky and the black hole
+    // with the astronaut silhouetted against it fills the lower half.
+    tall: { position: EYE_TALL, target: lookFrom(OUTPOST_EYE_TALL, [0.33, 0.21, -1]) },
   },
   {
     id: "sky",

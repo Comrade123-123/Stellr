@@ -51,15 +51,28 @@ export default function Footer() {
 
       <div className="mx-auto mt-16 flex max-w-[1100px] flex-col gap-3 border-t border-ink/10 pt-6 text-ink/40 sm:flex-row sm:justify-between">
         <span>© 2026 STELLR</span>
-        <span>
-          PLANET &amp; STAR TEXTURES BY{" "}
-          <a href="https://www.solarsystemscope.com/textures/" target="_blank" rel="noreferrer" className={linkClass}>
-            SOLAR SYSTEM SCOPE
-          </a>
-          , LICENSED{" "}
-          <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer" className={linkClass}>
-            CC BY 4.0
-          </a>
+        <span className="space-y-2 sm:text-right">
+          <span className="block">
+            PLANET &amp; STAR TEXTURES BY{" "}
+            <a href="https://www.solarsystemscope.com/textures/" target="_blank" rel="noreferrer" className={linkClass}>
+              SOLAR SYSTEM SCOPE
+            </a>
+            , LICENSED{" "}
+            <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer" className={linkClass}>
+              CC BY 4.0
+            </a>
+          </span>
+          <span className="block">
+            Z2 SPACESUIT MODEL:{" "}
+            <a href="https://github.com/nasa/NASA-3D-Resources" target="_blank" rel="noreferrer" className={linkClass}>
+              NASA 3D RESOURCES
+            </a>
+            {" "}· REGOLITH TEXTURE:{" "}
+            <a href="https://polyhaven.com/a/moon_dusted_02" target="_blank" rel="noreferrer" className={linkClass}>
+              POLY HAVEN (CC0)
+            </a>
+            {" "}· NO ENDORSEMENT IMPLIED
+          </span>
         </span>
       </div>
     </footer>

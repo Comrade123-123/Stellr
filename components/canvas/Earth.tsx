@@ -230,6 +230,9 @@ export default function Earth({ segments, reducedMotion }: EarthProps) {
     // straight at the camera; elsewhere it eases back to the normal axial tilt.
     const near = THREE.MathUtils.clamp(1 - Math.abs(scroll.journey - skyIndex) / 0.75, 0, 1);
     const focus = near * near * (3 - 2 * near);
+    // Earth stays out of the opening outpost scene; it appears once the camera lifts off towards it.
+    if (tilt.current) tilt.current.visible = scroll.journey >= skyIndex - 0.65;
+
     if (tilt.current) {
       const { goal } = scratch;
       goal.copy(BASE_TILT);

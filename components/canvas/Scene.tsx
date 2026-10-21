@@ -8,11 +8,13 @@ import { getQuality } from "@/lib/quality";
 import { scroll } from "@/lib/scroll";
 import { appStore, useAppStore } from "@/lib/store";
 import AsteroidField from "./AsteroidField";
+import BlackHole from "./BlackHole";
 import CameraRig from "./CameraRig";
 import Earth from "./Earth";
 import Effects from "./Effects";
 import Meteors from "./Meteors";
 import Orbits from "./Orbits";
+import Outpost from "./Outpost";
 import SolarSystem from "./SolarSystem";
 import Starfield from "./Starfield";
 
@@ -98,6 +100,8 @@ export default function Scene() {
         <Earth segments={quality.sphereSegments} reducedMotion={quality.reducedMotion} />
         <Orbits reducedMotion={quality.reducedMotion} />
         <AsteroidField count={quality.asteroidCount} reducedMotion={quality.reducedMotion} />
+        <Outpost segments={quality.sphereSegments} />
+        <BlackHole reducedMotion={quality.reducedMotion} />
         <Meteors reducedMotion={quality.reducedMotion} />
         <Ready />
       </Suspense>
