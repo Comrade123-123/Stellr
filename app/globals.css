@@ -54,8 +54,8 @@ html.lenis body {
     font-weight: 300;
     font-stretch: 125%;
     text-transform: uppercase;
-    letter-spacing: 0.02em;
-    line-height: 1.04;
+    letter-spacing: 0.03em;
+    line-height: 1.12;
   }
 
   /* Subheads and editorial copy: same face, narrower and smaller. */

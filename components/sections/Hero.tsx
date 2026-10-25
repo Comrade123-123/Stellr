@@ -20,11 +20,12 @@ export default function Hero() {
       id="hero"
       data-scene="hero"
       data-label="FIRST LIGHT"
-      className="relative flex min-h-svh flex-col items-center justify-between px-5 pb-[9vh] pt-[15vh] text-center"
+      className="relative flex min-h-svh flex-col items-center justify-between gap-12 px-5 pb-[9vh] pt-[15vh] text-center"
     >
       <div className="flex flex-col items-center">
         <IndexBar index="001" label="FIRST LIGHT" centered />
-        <h1 className="display mt-8 max-w-[20ch] text-[clamp(1.7rem,3.6vw,3.6rem)] text-ink">
+        {/* Sized by the shorter of width and height, so short laptop screens and zoomed browsers keep it in proportion. */}
+        <h1 className="display mt-8 max-w-[min(20ch,92vw)] text-[clamp(1.6rem,min(3.6vw,6vh),3.6rem)] text-ink">
           <SplitWords text="From your backyard to the edge of the observable universe." />
         </h1>
       </div>
