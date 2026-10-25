@@ -125,17 +125,17 @@ const cloudFragment = /* glsl */ `
     c.y = -c.y;
     float r2 = dot(c, c);
     if (r2 > 1.0) discard;
-    float f = fbm(c * 2.1 + vSeed * 41.0);
+    float f = fbm(c * 1.3 + vSeed * 41.0);
     // A cauliflower edge: a soft gaussian falloff eaten into by the noise, so no puff shows a disc's rim.
-    float shape = exp(-r2 * 2.6) * (0.3 + 1.4 * f) - r2 * 0.12;
-    float a = smoothstep(0.06, 0.62, shape) * vAlpha;
+    float shape = exp(-r2 * 2.4) * (0.5 + 1.0 * f) - r2 * 0.1;
+    float a = smoothstep(0.03, 0.75, shape) * vAlpha;
     if (a < 0.003) discard;
 
     // Shade each puff as a lumpy ball.
-    vec3 n = normalize(vec3(c * 0.8 + (f - 0.5) * 1.1, sqrt(max(0.0, 1.0 - r2)) + 0.45));
+    vec3 n = normalize(vec3(c * 0.75 + (f - 0.5) * 0.6, sqrt(max(0.0, 1.0 - r2)) + 0.5));
     float warm = clamp(dot(n, vWarmDir) * 0.6 + 0.4, 0.0, 1.0);
     float moon = clamp(dot(n, vMoonDir) * 0.5 + 0.5, 0.0, 1.0);
-    vec3 albedo = vec3(0.8, 0.79, 0.78) * (0.7 + 0.45 * f);
+    vec3 albedo = vec3(0.8, 0.79, 0.78) * (0.8 + 0.25 * f);
     vec3 col = albedo * (vec3(0.03, 0.035, 0.05) + vec3(0.3, 0.35, 0.46) * moon * 0.4 * vDim + vWarm * warm)
              + vEmit * (0.55 + 0.6 * f);
     gl_FragColor = vec4(col * a, a);
