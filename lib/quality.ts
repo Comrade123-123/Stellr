@@ -21,8 +21,8 @@ export interface Quality {
 
 const PRESETS: Record<Tier, Omit<Quality, "tier" | "reducedMotion" | "isMobile">> = {
   high: { dpr: [1, 1.75], postprocessing: true, multisampling: 4, starCount: 9000, plumeCount: 2600, groundCount: 900, sphereSegments: 128, galaxyStars: 60000, blackHoleSteps: 260 },
-  medium: { dpr: [1, 1.5], postprocessing: true, multisampling: 0, starCount: 5000, plumeCount: 1700, groundCount: 600, sphereSegments: 96, galaxyStars: 32000, blackHoleSteps: 200 },
-  low: { dpr: [1, 1.25], postprocessing: false, multisampling: 0, starCount: 2500, plumeCount: 1300, groundCount: 420, sphereSegments: 64, galaxyStars: 16000, blackHoleSteps: 150 },
+  medium: { dpr: [1, 1.5], postprocessing: true, multisampling: 0, starCount: 5000, plumeCount: 1700, groundCount: 600, sphereSegments: 96, galaxyStars: 32000, blackHoleSteps: 160 },
+  low: { dpr: [1, 1.25], postprocessing: false, multisampling: 0, starCount: 2500, plumeCount: 1300, groundCount: 420, sphereSegments: 64, galaxyStars: 16000, blackHoleSteps: 120 },
 };
 
 const SOFTWARE_GPU = /swiftshader|llvmpipe|software|basic render|mali-4|adreno \(tm\) [1-4]\d\d/i;

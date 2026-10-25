@@ -127,10 +127,21 @@ html.lenis body {
   to { transform: scale(1.07) translate3d(-1%, -1%, 0); }
 }
 
+/* Black-hole callouts fade in once the camera arrives. */
+.callout {
+  animation: callout-in 1.2s ease-out both;
+}
+
+@keyframes callout-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scroll-cue,
   .live-dot,
-  .fallback-drift {
+  .fallback-drift,
+  .callout {
     animation: none;
   }
 }

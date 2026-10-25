@@ -113,7 +113,12 @@ export default function Scene() {
       <Suspense fallback={null}>
         <SolarSystem reducedMotion={quality.reducedMotion} />
         <Galaxy starCount={degraded ? Math.round(quality.galaxyStars / 2) : quality.galaxyStars} />
-        <BlackHole steps={quality.blackHoleSteps} reducedMotion={quality.reducedMotion} />
+        <BlackHole
+          steps={degraded ? 100 : quality.blackHoleSteps}
+          reducedMotion={quality.reducedMotion}
+          dpr={degraded ? 1 : quality.dpr}
+          maxDpr={quality.tier === "high" && !degraded ? 1.5 : 1}
+        />
       </Suspense>
       <DevCapture />
       <CameraRig parallax={!quality.reducedMotion && !quality.isMobile} />
