@@ -90,7 +90,7 @@ export default function Meteors({ reducedMotion }: { reducedMotion: boolean }) {
     if (!group.current) return;
     // Pinned to the camera like the starfield, so streaks read as infinitely far away.
     group.current.position.copy(camera.position);
-    const active = !reducedMotion && scroll.journey < 2.5;
+    const active = !reducedMotion && scroll.view < 2.5;
     const dt = Math.min(delta, 0.1);
 
     for (const s of streaks) {

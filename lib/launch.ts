@@ -23,6 +23,16 @@ export const INTRO_TALL = {
   target: [0, 7, 60] as [number, number, number],
 };
 
+/** Part-way to orbit: risen and tilted up after the climbing rocket, the ground cloud below the frame. */
+export const INTRO_CLIMB_WIDE = {
+  position: [0, 14, 98] as [number, number, number],
+  target: [0, 22, 60] as [number, number, number],
+};
+export const INTRO_CLIMB_TALL = {
+  position: [0, 15, 110] as [number, number, number],
+  target: [0, 23, 60] as [number, number, number],
+};
+
 /**
  * Hero camera: in orbit over Earth's night side with the Sun exactly on the
  * horizon. For a unit sphere, a camera at (−S·a + U·h) sees the Sun at the limb

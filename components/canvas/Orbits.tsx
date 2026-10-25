@@ -102,7 +102,7 @@ export default function Orbits({ reducedMotion }: { reducedMotion: boolean }) {
   const v = useMemo(() => new THREE.Vector3(), []);
 
   useFrame(({ clock }) => {
-    const t = THREE.MathUtils.clamp((scroll.journey - start) / 0.6, 0, 1);
+    const t = THREE.MathUtils.clamp((scroll.view - start) / 0.6, 0, 1);
     const fade = t * t * (3 - 2 * t);
     ringMaterial.opacity = fade * 0.14;
     satMaterial.uniforms.uOpacity.value = fade;

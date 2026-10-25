@@ -19,11 +19,11 @@ export default function CameraRig({ parallax }: CameraRigProps) {
   const pointer = useRef({ x: 0, y: 0, sx: 0, sy: 0 });
 
   useEffect(() => {
-    sampleCamera(scroll.journey, size.width / size.height, goalPosition.current, goalTarget.current);
+    scroll.view = scroll.journey;
+    sampleCamera(scroll.view, size.width / size.height, goalPosition.current, goalTarget.current);
     camera.position.copy(goalPosition.current);
     target.current.copy(goalTarget.current);
     camera.lookAt(target.current);
-    // Snap only on mount; resizes ease in through useFrame.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camera]);
 
@@ -38,9 +38,14 @@ export default function CameraRig({ parallax }: CameraRigProps) {
     return () => window.removeEventListener("pointermove", onMove);
   }, [parallax]);
 
+  // Runs before the scene's other frame callbacks, so everything this frame reads the same eased journey.
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.1);
-    sampleCamera(scroll.journey, size.width / size.height, goalPosition.current, goalTarget.current);
+    // Ease the journey itself rather than the camera's position: the camera then always sits
+    // on the authored path (never cutting a corner through Earth), and fades stay in step with it.
+    scroll.view += (scroll.journey - scroll.view) * (1 - Math.exp(-dt * 5));
+    if (Math.abs(scroll.journey - scroll.view) < 1e-5) scroll.view = scroll.journey;
+    sampleCamera(scroll.view, size.width / size.height, goalPosition.current, goalTarget.current);
 
     const p = pointer.current;
     const ease = 1 - Math.exp(-dt * 2.5);
@@ -49,11 +54,10 @@ export default function CameraRig({ parallax }: CameraRigProps) {
     goalPosition.current.x += p.sx * 0.08;
     goalPosition.current.y -= p.sy * 0.05;
 
-    const follow = 1 - Math.exp(-dt * 6);
-    camera.position.lerp(goalPosition.current, follow);
-    target.current.lerp(goalTarget.current, follow);
+    camera.position.copy(goalPosition.current);
+    target.current.copy(goalTarget.current);
     camera.lookAt(target.current);
-  });
+  }, -1);
 
   return null;
 }

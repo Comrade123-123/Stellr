@@ -86,7 +86,7 @@ export default function SunFlare({ reducedMotion }: { reducedMotion: boolean }) 
     const m = mesh.current;
     if (!m) return;
     // Rises in as the camera reaches orbit, fades as it moves on to Your Sky.
-    const d = Math.abs(scroll.journey - hero);
+    const d = Math.abs(scroll.view - hero);
     const opacity = THREE.MathUtils.clamp(1 - (d - 0.15) / 0.45, 0, 1);
     material.uniforms.uOpacity.value = opacity * opacity * (3 - 2 * opacity);
     m.visible = opacity > 0.001;

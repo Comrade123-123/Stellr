@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { INTRO_TALL, INTRO_WIDE, sunrisePose } from "./launch";
+import { INTRO_CLIMB_TALL, INTRO_CLIMB_WIDE, INTRO_TALL, INTRO_WIDE, sunrisePose } from "./launch";
 import { ORBIT_PLANE, SUN_POSITION } from "./solar";
 
 /**
@@ -13,6 +13,8 @@ import { ORBIT_PLANE, SUN_POSITION } from "./solar";
 export const scroll = {
   y: 0,
   journey: 0,
+  /** The journey the canvas is showing: `journey` eased over time, so the 3D never jumps with the scrollbar. */
+  view: 0,
 };
 
 let anchors: number[] = [];
@@ -54,6 +56,8 @@ interface Waypoint {
   wide: Pose;
   /** Portrait / phone framing. */
   tall: Pose;
+  /** An extra pose part-way (`at`, 0–1) towards the next waypoint, to steer the move around something. */
+  via?: { at: number; wide: Pose; tall: Pose };
 }
 
 /** A pose expressed in the orbital plane's frame: offsets from the Sun along Sun→Earth, north and prograde. */
@@ -70,6 +74,8 @@ export const CAMERA_PATH: Waypoint[] = [
     // The launch pad at night: rocket centred, its plume filling the lower frame.
     wide: INTRO_WIDE,
     tall: INTRO_TALL,
+    // Rise with the rocket first, so the smoke drops out of frame instead of the camera flying through it.
+    via: { at: 0.4, wide: INTRO_CLIMB_WIDE, tall: INTRO_CLIMB_TALL },
   },
   {
     id: "hero",
@@ -123,6 +129,29 @@ const smooth = (t: number) => t * t * (3 - 2 * t);
 const a = new THREE.Vector3();
 const b = new THREE.Vector3();
 
+/**
+ * Moves between two poses around Earth (at the origin) rather than through it:
+ * the eye's direction from Earth swings along a great circle while its distance
+ * eases geometrically, so a move from orbit to far out (or back) never cuts
+ * through the planet and covers near and far ranges at an even pace.
+ */
+function blendPose(from: Pose, to: Pose, t: number, outPosition: THREE.Vector3, outTarget: THREE.Vector3) {
+  outTarget.fromArray(from.target).lerp(b.fromArray(to.target), t);
+  a.fromArray(from.position);
+  b.fromArray(to.position);
+  const ra = a.length();
+  const rb = b.length();
+  a.divideScalar(ra);
+  b.divideScalar(rb);
+  const angle = Math.acos(THREE.MathUtils.clamp(a.dot(b), -1, 1));
+  if (angle < 1e-4) outPosition.copy(a);
+  else {
+    const s = Math.sin(angle);
+    outPosition.copy(a).multiplyScalar(Math.sin((1 - t) * angle) / s).addScaledVector(b, Math.sin(t * angle) / s);
+  }
+  outPosition.multiplyScalar(ra * Math.pow(rb / ra, t));
+}
+
 export function sampleCamera(
   journey: number,
   aspect: number,
@@ -133,12 +162,15 @@ export function sampleCamera(
   const max = CAMERA_PATH.length - 1;
   const j = THREE.MathUtils.clamp(journey, 0, max);
   const i = Math.max(0, Math.min(Math.floor(j), max - 1));
+  // Eased over the whole section-to-section move, so the camera settles at each section.
   const t = smooth(j - i);
-  const from = CAMERA_PATH[i][framing];
-  const to = CAMERA_PATH[Math.min(i + 1, max)][framing];
+  const from = CAMERA_PATH[i];
+  const to = CAMERA_PATH[Math.min(i + 1, max)];
+  const via = from.via;
 
-  outTarget.copy(a.fromArray(from.target).lerp(b.fromArray(to.target), t));
-  outPosition.copy(a.fromArray(from.position).lerp(b.fromArray(to.position), t));
+  if (!via) blendPose(from[framing], to[framing], t, outPosition, outTarget);
+  else if (t < via.at) blendPose(from[framing], via[framing], t / via.at, outPosition, outTarget);
+  else blendPose(via[framing], to[framing], (t - via.at) / (1 - via.at), outPosition, outTarget);
 
   // Poses are authored for ~16:10. Narrower landscape screens back the camera
   // off along its view line so the subject keeps the same horizontal footprint.

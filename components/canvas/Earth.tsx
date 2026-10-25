@@ -231,10 +231,10 @@ export default function Earth({ segments, reducedMotion }: EarthProps) {
 
     // Around the "Your sky" section, swing the whole globe so the visitor's pin points
     // straight at the camera; elsewhere it eases back to the normal axial tilt.
-    const near = THREE.MathUtils.clamp(1 - Math.abs(scroll.journey - skyIndex) / 0.75, 0, 1);
+    const near = THREE.MathUtils.clamp(1 - Math.abs(scroll.view - skyIndex) / 0.75, 0, 1);
     const focus = near * near * (3 - 2 * near);
     // Earth stays out of the launch-site shot; it appears as the camera climbs to orbit.
-    if (tilt.current) tilt.current.visible = scroll.journey >= 0.4;
+    if (tilt.current) tilt.current.visible = scroll.view >= 0.4;
 
     if (tilt.current) {
       const { goal } = scratch;

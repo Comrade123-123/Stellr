@@ -84,12 +84,14 @@ const cloudVertex = /* glsl */ `
 
     // Warm light from the flame just under the engine and the pad's glow.
     vec3 flame = vec3(0.0, uTop - 0.35, 0.0);
-    vec3 toFlame = flame - p;
-    float engine = 5.5 / (1.0 + dot(toFlame, toFlame) * 0.09);
+    // Depth counts for half, so puffs between the camera and the flame aren't left much darker than those beside it.
+    vec3 toFlame = (flame - p) * vec3(1.0, 1.0, 0.5);
+    float engine = 9.0 / (1.0 + dot(toFlame, toFlame) * 0.07);
     vec3 pad = vec3(0.0, 0.6, 0.0);
-    float glow = 1.4 * exp(-length(p - pad) * 0.17);
-    vec3 warmDir = normalize(toFlame * engine + (pad - p) * glow + vec3(0.0, 0.0, 0.001));
-    vWarm = vec3(1.0, 0.66, 0.36) * (engine + glow);
+    float glow = 8.0 * exp(-length((p - pad) * vec3(1.0, 1.0, 0.5)) * 0.2);
+    vec3 warmDir = normalize(toFlame * engine + (pad - p) * vec3(1.0, 1.0, 0.5) * glow + vec3(0.0, 0.0, 0.001));
+    // Saturates softly, so the brightest puffs roll off to warm white instead of clipping into hue bands.
+    vWarm = vec3(1.0, 0.66, 0.36) * 4.0 * (1.0 - exp(-(engine + glow) / 4.0));
     vWarmDir = normalize((viewMatrix * vec4(warmDir, 0.0)).xyz);
     vMoonDir = normalize((viewMatrix * vec4(-0.45, 0.8, 0.4, 0.0)).xyz);
     vEmit = vec3(1.0, 0.78, 0.5) * heat * 2.6;
@@ -127,21 +129,25 @@ const cloudFragment = /* glsl */ `
     if (r2 > 1.0) discard;
     float f = fbm(c * 1.3 + vSeed * 41.0);
     // A cauliflower edge: a soft gaussian falloff eaten into by the noise, so no puff shows a disc's rim.
-    float shape = exp(-r2 * 2.4) * (0.5 + 1.0 * f) - r2 * 0.1;
-    float a = smoothstep(0.03, 0.75, shape) * vAlpha;
+    float shape = exp(-r2 * 2.4) * (0.3 + 1.4 * f) - r2 * 0.1;
+    // No flat top: each puff thins out from its middle, so overlapping puffs blend into one mass, not stacked discs.
+    float a = pow(clamp(shape * 1.25, 0.0, 1.0), 1.2) * vAlpha;
     if (a < 0.003) discard;
 
-    // Shade each puff as a lumpy ball.
-    vec3 n = normalize(vec3(c * 0.75 + (f - 0.5) * 0.6, sqrt(max(0.0, 1.0 - r2)) + 0.5));
-    float warm = clamp(dot(n, vWarmDir) * 0.6 + 0.4, 0.0, 1.0);
+    // Light wraps softly round each puff; the noise gives it lumps.
+    vec3 n = normalize(vec3(c * 0.6 + (f - 0.5) * 1.0, sqrt(1.0 - r2) + 0.3));
+    // Thin, lumpy fringes catch more light than the dense folds between them.
+    float warm = clamp(dot(n, vWarmDir) * 0.45 + 0.55, 0.0, 1.0) * mix(0.55, 1.2, f);
     float moon = clamp(dot(n, vMoonDir) * 0.5 + 0.5, 0.0, 1.0);
-    vec3 albedo = vec3(0.8, 0.79, 0.78) * (0.8 + 0.25 * f);
-    vec3 col = albedo * (vec3(0.03, 0.035, 0.05) + vec3(0.3, 0.35, 0.46) * moon * 0.4 * vDim + vWarm * warm)
+    vec3 albedo = vec3(0.8, 0.79, 0.78) * (0.7 + 0.5 * f);
+    vec3 col = albedo * (vec3(0.03, 0.035, 0.05) + vec3(0.32, 0.35, 0.42) * moon * 0.6 * vDim + vWarm * warm)
              + vEmit * (0.55 + 0.6 * f);
-    gl_FragColor = vec4(col * a, a);
+    gl_FragColor = vec4(col, a);
     // Tone-mapped here only when drawing straight to the screen (no post-processing), matching the composer's look.
+    // Both curves run on the straight colour; premultiplying first would brighten every puff's thin edge into a halo.
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
+    gl_FragColor.rgb *= a;
   }
 `;
 
@@ -334,7 +340,7 @@ export default function LaunchScene({
   const buffer = useMemo(() => new THREE.Vector2(), []);
 
   useFrame(({ clock }) => {
-    const j = scroll.journey;
+    const j = scroll.view;
     // Fully present in the Intro, fading as the camera heads to orbit.
     const t = THREE.MathUtils.clamp((j - 0.45) / 0.35, 0, 1);
     const presence = 1 - t * t * (3 - 2 * t);

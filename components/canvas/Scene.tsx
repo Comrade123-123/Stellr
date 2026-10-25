@@ -50,7 +50,7 @@ function DevCapture() {
     w.__stellrCapture = (journey) => {
       const state = get();
       const previous = state.frameloop;
-      if (journey !== undefined) scroll.journey = journey;
+      if (journey !== undefined) scroll.journey = scroll.view = journey;
       state.setFrameloop("never");
       let t = state.clock.elapsedTime;
       for (let i = 0; i < 120; i++) {
