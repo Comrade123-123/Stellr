@@ -21,7 +21,7 @@ export default function FinalCTA() {
     >
       {/* Copy above and below, so the black hole holds the middle of the screen. */}
       <div className="flex w-full flex-col items-center">
-        <IndexBar index="008" label="WAITLIST" className="w-full max-w-[1100px] text-left" />
+        <IndexBar index="008" label="WAITLIST" centered />
         <h2 className="display mt-10 max-w-[20ch] text-[clamp(1.7rem,3.4vw,3.6rem)] text-ink">
           <SplitWords text="Be first to fly through the universe." />
         </h2>

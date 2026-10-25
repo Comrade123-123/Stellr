@@ -33,8 +33,11 @@ export default function Roadmap() {
         <h2 className="display mt-14 max-w-[18ch] text-[clamp(1.7rem,3.4vw,3.5rem)] text-ink">
           <SplitWords text="One sky at a time. Then the galaxy." />
         </h2>
+        <p className="caps reveal-fade mt-6 max-w-[46ch] text-[12px] text-ink/60 sm:text-[13px]">
+          Stellr grows one instrument at a time. Here is what is live, and what comes next.
+        </p>
 
-        <ol className="reveal-fade frame mt-12 bg-void/55 backdrop-blur-sm">
+        <ol className="reveal-fade frame mt-10 bg-void/55 backdrop-blur-sm">
           {PHASES.map((p) => (
             <li key={p.phase} className="grid grid-cols-[auto_1fr_auto] items-baseline gap-x-5 border-b border-ink/10 p-5 last:border-b-0">
               <span className="font-mono text-xs tracking-[0.15em] text-gold">[{p.phase}]</span>

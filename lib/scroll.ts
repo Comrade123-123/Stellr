@@ -114,7 +114,8 @@ export const CAMERA_PATH: Waypoint[] = [
     // Far above the orbital plane: the inner system sits right of the copy, Earth's gold orbit and label below,
     // the giants' orbits sweeping off-frame. Coordinates are (toward Earth, north, prograde).
     wide: inOrbitFrame([20, 0, -42], [190, 190, -26]),
-    tall: inOrbitFrame([-26, 0, 0], [230, 400, 20]),
+    // The system sits in the lower part of the screen, under the copy.
+    tall: inOrbitFrame([-110, 0, 0], [230, 400, 20]),
   },
   {
     id: "roadmap",

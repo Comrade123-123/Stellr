@@ -32,7 +32,7 @@ export default function Telemetry() {
       data-label="REAL TIME"
       className="relative flex min-h-[120svh] flex-col px-5 pt-[18vh] sm:px-10"
     >
-      <IndexBar index="005" label="REAL TIME" className="mx-auto w-full max-w-[1100px]" />
+      <IndexBar index="005" label="REAL TIME" centered />
 
       <div className="mx-auto mt-14 flex w-full max-w-[1100px] flex-col items-center text-center">
         <h2 className="display max-w-[22ch] text-[clamp(1.7rem,3.4vw,3.5rem)] text-ink">

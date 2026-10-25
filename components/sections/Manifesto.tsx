@@ -17,7 +17,7 @@ export default function Manifesto() {
       data-label="WHY STELLR"
       className="relative flex min-h-[110svh] flex-col px-5 pt-[18vh] sm:px-10"
     >
-      <IndexBar index="003" label="WHY STELLR" className="mx-auto w-full max-w-[1100px]" />
+      <IndexBar index="003" label="WHY STELLR" centered />
 
       <div className="mx-auto mt-16 flex max-w-[1000px] flex-col items-center text-center">
         <h2 className="display max-w-[20ch] text-[clamp(1.7rem,3.4vw,3.5rem)] text-ink">

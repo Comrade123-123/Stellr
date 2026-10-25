@@ -47,8 +47,11 @@ export default function Tools() {
         <h2 className="display mt-14 max-w-[18ch] text-[clamp(1.7rem,3.4vw,3.5rem)] text-ink">
           <SplitWords text="Four instruments. One live sky." />
         </h2>
+        <p className="caps reveal-fade mt-6 max-w-[46ch] text-[12px] text-ink/60 sm:text-[13px]">
+          Each one opens in a browser tab, runs on live data and draws the sky around you in real-time 3D.
+        </p>
 
-        <ul className="mt-14 grid gap-5 sm:grid-cols-2">
+        <ul className="mt-12 grid gap-5 sm:grid-cols-2">
           {TOOLS.map((tool, i) => (
             <li key={tool.name} className="reveal-fade frame bg-void/55 p-6 backdrop-blur-sm sm:p-7">
               <span className="font-mono text-xs tracking-[0.15em] text-gold">[{String(i + 1).padStart(2, "0")}]</span>
