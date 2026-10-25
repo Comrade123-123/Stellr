@@ -9,6 +9,7 @@ import Footer from "@/components/sections/Footer";
 import Hero from "@/components/sections/Hero";
 import Intro from "@/components/sections/Intro";
 import Manifesto from "@/components/sections/Manifesto";
+import Roadmap from "@/components/sections/Roadmap";
 import SkyTonight from "@/components/sections/SkyTonight";
 import Telemetry from "@/components/sections/Telemetry";
 import Tools from "@/components/sections/Tools";
@@ -29,6 +30,7 @@ export default function Home() {
         <Tools />
         <Telemetry />
         <Cosmoscope />
+        <Roadmap />
         <FinalCTA />
       </main>
       <div className="relative z-10">

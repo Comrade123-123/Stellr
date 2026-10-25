@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { INTRO_CLIMB_TALL, INTRO_CLIMB_WIDE, INTRO_TALL, INTRO_WIDE, sunrisePose } from "./launch";
+import { ENDING_TALL, ENDING_WIDE, ROADMAP_TALL, ROADMAP_WIDE } from "./galaxy";
 import { ORBIT_PLANE, SUN_POSITION } from "./solar";
 
 /**
@@ -116,10 +117,16 @@ export const CAMERA_PATH: Waypoint[] = [
     tall: inOrbitFrame([-26, 0, 0], [230, 400, 20]),
   },
   {
+    id: "roadmap",
+    // Out past the planets and above the galaxy: the whole Milky Way, the Sun marked on one arm.
+    wide: ROADMAP_WIDE,
+    tall: ROADMAP_TALL,
+  },
+  {
     id: "cta",
-    // Earth rises again at the end, as in the opening.
-    wide: { position: [0.4, -0.05, 2.3], target: [0.1, 1.62, 0] },
-    tall: { position: [0.3, 0.0, 2.9], target: [0.1, 1.35, 0] },
+    // Down into the galactic centre, face to face with its black hole.
+    wide: ENDING_WIDE,
+    tall: ENDING_TALL,
   },
 ];
 

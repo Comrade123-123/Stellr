@@ -8,8 +8,10 @@ import { getQuality } from "@/lib/quality";
 import { scroll } from "@/lib/scroll";
 import { appStore, useAppStore } from "@/lib/store";
 import CameraRig from "./CameraRig";
+import BlackHole from "./BlackHole";
 import Earth from "./Earth";
 import Effects from "./Effects";
+import Galaxy from "./Galaxy";
 import LaunchScene from "./LaunchScene";
 import Meteors from "./Meteors";
 import Orbits from "./Orbits";
@@ -82,7 +84,7 @@ export default function Scene() {
         stencil: false,
         powerPreference: "high-performance",
       }}
-      camera={{ fov: 40, near: 0.1, far: 4000, position: [0, 0.3, 3.3] }}
+      camera={{ fov: 40, near: 0.1, far: 12000, position: [0, 0.3, 3.3] }}
       onCreated={({ gl }) => {
         gl.setClearColor("#000000");
         // A lost context (GPU reset) usually means the effects were too heavy:
@@ -110,6 +112,8 @@ export default function Scene() {
       {/* Loads after first paint and never holds up the loader. */}
       <Suspense fallback={null}>
         <SolarSystem reducedMotion={quality.reducedMotion} />
+        <Galaxy starCount={degraded ? Math.round(quality.galaxyStars / 2) : quality.galaxyStars} />
+        <BlackHole steps={quality.blackHoleSteps} reducedMotion={quality.reducedMotion} />
       </Suspense>
       <DevCapture />
       <CameraRig parallax={!quality.reducedMotion && !quality.isMobile} />

@@ -13,14 +13,15 @@ const COLUMNS: { title: string; links: [string, string][] }[] = [
   {
     title: "COMING NEXT",
     links: [
-      ["COSMOSCOPE", "#tools"],
-      ["EXOPLANET LAB", "#tools"],
-      ["ANVESHAK", "#tools"],
+      ["COSMOSCOPE", "#roadmap"],
+      ["EXOPLANET LAB", "#roadmap"],
+      ["ANVESHAK", "#roadmap"],
     ],
   },
   {
     title: "STELLR",
     links: [
+      ["ROADMAP", "#roadmap"],
       ["JOIN THE WAITLIST", "#waitlist"],
       ["BACK TO TOP", "#top"],
     ],

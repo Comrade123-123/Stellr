@@ -136,7 +136,14 @@ const atmosphereFragment = /* glsl */ `
     float dusk = smoothstep(-0.05, 0.05, ndl) * smoothstep(0.3, 0.05, ndl);
     vec3 tint = mix(uAtmosphere, vec3(1.0, 0.6, 0.35), dusk * 0.3);
 
-    gl_FragColor = vec4(tint * glow * sunSide * 1.5, 1.0);
+    // Looking towards the Sun across the limb, the air scatters it forward: a warm band that hugs the
+    // horizon either side of the sunrise and fades away from it, as seen from orbit.
+    float toward = max(dot(-V, normalize(uSun)), 0.0);
+    float forward = pow(toward, 220.0) * 1.4 + pow(toward, 40.0) * 0.3;
+    float rim = forward * smoothstep(-0.25, 0.0, ndl) * glow * glow;   // squared: a thin band on the limb
+    vec3 scatter = mix(vec3(1.0, 0.4, 0.1), vec3(1.0, 0.8, 0.55), pow(toward, 220.0)) * rim;
+
+    gl_FragColor = vec4(tint * glow * sunSide * 1.5 + scatter, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }

@@ -1,0 +1,55 @@
+"use client";
+
+import { useRef } from "react";
+import { useReveal } from "@/components/ui/useReveal";
+import IndexBar from "@/components/ui/IndexBar";
+import SplitWords from "@/components/ui/SplitWords";
+
+const PHASES: { phase: string; name: string; body: string; status: string; live?: boolean }[] = [
+  { phase: "01", name: "Your Sky, Tonight", body: "Moon, planets and twilight for wherever you stand.", status: "LIVE", live: true },
+  { phase: "02", name: "Orbit Watch · Sky Events", body: "The ISS and satellites overhead, and what's coming up in your sky.", status: "NEXT" },
+  { phase: "03", name: "Asteroid Sentinel · Space Weather", body: "Near-Earth objects on approach, flares and aurora as they develop.", status: "PLANNED" },
+  { phase: "04", name: "Cosmoscope", body: "Fly between the planets at their real positions.", status: "PLANNED" },
+  { phase: "05", name: "Exoplanet Lab", body: "Worlds around other stars, found the way astronomers find them.", status: "PLANNED" },
+  { phase: "06", name: "Anveshak", body: "A research agent for questions about the sky.", status: "EXPLORING" },
+];
+
+/** The road ahead, laid over the Milky Way seen from outside, the Sun marked on its arm. */
+export default function Roadmap() {
+  const root = useRef<HTMLElement>(null);
+  useReveal(root);
+
+  return (
+    <section
+      ref={root}
+      id="roadmap"
+      data-scene="roadmap"
+      data-label="ROADMAP"
+      className="relative min-h-[130svh] px-5 pb-24 pt-[18vh] sm:px-10 lg:px-16"
+    >
+      <IndexBar index="007" label="ROADMAP" className="max-w-[1100px] lg:w-[46%]" />
+
+      <div className="max-sm:mt-[38svh] lg:w-[46%]">
+        <h2 className="display mt-14 max-w-[18ch] text-[clamp(1.7rem,3.4vw,3.5rem)] text-ink">
+          <SplitWords text="One sky at a time. Then the galaxy." />
+        </h2>
+
+        <ol className="reveal-fade frame mt-12 bg-void/55 backdrop-blur-sm">
+          {PHASES.map((p) => (
+            <li key={p.phase} className="grid grid-cols-[auto_1fr_auto] items-baseline gap-x-5 border-b border-ink/10 p-5 last:border-b-0">
+              <span className="font-mono text-xs tracking-[0.15em] text-gold">[{p.phase}]</span>
+              <div>
+                <h3 className="display text-base text-ink sm:text-lg">{p.name}</h3>
+                <p className="mt-2 text-[14px] leading-relaxed text-ink/60">{p.body}</p>
+              </div>
+              <span className={`font-mono text-[10px] tracking-[0.18em] ${p.live ? "text-gold" : "text-ink/45"}`}>
+                {p.live && <span className="mr-2 inline-block h-[6px] w-[6px] rounded-full bg-gold align-middle" />}
+                {p.status}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </section>
+  );
+}
