@@ -6,7 +6,7 @@ const COLUMNS: { title: string; links: [string, string][] }[] = [
     links: [
       ["ORBIT WATCH", "/orbit-watch"],
       ["ASTEROID SENTINEL", "#tools"],
-      ["SKY EVENTS", "#tools"],
+      ["SKY EVENTS", "/sky-events"],
       ["SPACE WEATHER", "#tools"],
     ],
   },

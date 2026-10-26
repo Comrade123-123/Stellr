@@ -23,6 +23,7 @@ const TOOLS: { name: string; body: string; tags: string[]; href?: string }[] = [
     name: "Sky Events",
     body: "Meteor showers, eclipses, conjunctions and launches, timed to your local sky.",
     tags: ["ECLIPSES", "METEORS", "LAUNCHES"],
+    href: "/sky-events",
   },
   {
     name: "Space Weather",

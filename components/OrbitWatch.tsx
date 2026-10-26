@@ -5,12 +5,11 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { SwarmStatus } from "@/components/canvas/OrbitScene";
 import ScrambleText from "@/components/ui/ScrambleText";
-import { CITIES, guessCity, type Place } from "@/lib/places";
+import PlacePicker, { usePlace } from "@/components/PlacePicker";
 import { compass, parseTLE, passes, stateAt, type Pass, type Satellite, type State } from "@/lib/orbits";
 
 const OrbitScene = dynamic(() => import("@/components/canvas/OrbitScene"), { ssr: false });
 
-const MY_LOCATION = "__here";
 
 /** The objects worth following by name; the rest are dots. NORAD numbers. */
 const TRACKABLE: { id: number; label: string }[] = [
@@ -160,13 +159,11 @@ const lonLabel = (lon: number) => `${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? "E
 
 /** Orbit Watch: live satellites on a real-time globe, and the next passes over the visitor. */
 export default function OrbitWatch() {
+  const placeState = usePlace();
+  const { place } = placeState;
   const [sats, setSats] = useState<Satellite[]>([]);
   const [load, setLoad] = useState<Load>("loading");
   const [trackedId, setTrackedId] = useState(25544);
-  const [place, setPlace] = useState<Place | null>(null);
-  const [here, setHere] = useState<Place | null>(null);
-  const [geoError, setGeoError] = useState("");
-  const [locating, setLocating] = useState(false);
   const [follow, setFollow] = useState(true);
   const [swarm, setSwarm] = useState(false);
   const [swarmStatus, setSwarmStatus] = useState<SwarmStatus>({ state: "off" });
@@ -187,9 +184,8 @@ export default function OrbitWatch() {
   }, []);
 
   useEffect(() => {
-    // Both need the browser: the time zone for a first guess, and the network for elements.
+    // Elements come over the network, so they can only load after mount.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setPlace(guessCity());
     fetchAll();
   }, [fetchAll]);
 
@@ -226,31 +222,7 @@ export default function OrbitWatch() {
     return () => clearInterval(id);
   }, [tracked, place]);
 
-  const locate = () => {
-    if (!("geolocation" in navigator)) {
-      setGeoError("Location isn't available in this browser.");
-      return;
-    }
-    setLocating(true);
-    setGeoError("");
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const mine: Place = {
-          name: `${pos.coords.latitude.toFixed(1)}°, ${pos.coords.longitude.toFixed(1)}°`,
-          lat: pos.coords.latitude,
-          lon: pos.coords.longitude,
-        };
-        setHere(mine);
-        setPlace(mine);
-        setLocating(false);
-      },
-      () => {
-        setGeoError("Couldn't get your location. Pick a city instead.");
-        setLocating(false);
-      },
-      { maximumAge: 600_000, timeout: 10_000 },
-    );
-  };
+
 
   const tz = place?.timeZone;
   const label = TRACKABLE.find((t) => t.id === trackedId)?.label ?? tracked?.name ?? "";
@@ -383,33 +355,9 @@ export default function OrbitWatch() {
           {/* Where the visitor is */}
           <div className="border-b border-ink/10 p-5">
             <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">YOUR SKY</p>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <select
-                aria-label="Location"
-                value={place && place === here ? MY_LOCATION : (place?.name ?? "")}
-                onChange={(e) => {
-                  if (e.target.value === MY_LOCATION && here) setPlace(here);
-                  else setPlace(CITIES.find((c) => c.name === e.target.value) ?? null);
-                }}
-                className="h-9 min-w-0 flex-1 rounded-full border border-ink/25 bg-void px-4 font-mono text-[11px] tracking-[0.12em] text-ink outline-none focus:border-ink/60"
-              >
-                {here && <option value={MY_LOCATION}>MY LOCATION ({here.name})</option>}
-                {CITIES.map((c) => (
-                  <option key={c.name} value={c.name}>
-                    {c.name.toUpperCase()}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={locate}
-                disabled={locating}
-                className="h-9 shrink-0 rounded-full border border-ink/25 px-4 font-mono text-[10px] tracking-[0.18em] text-ink/80 transition-colors hover:border-ink/60 disabled:opacity-50"
-              >
-                {locating ? "LOCATING…" : "USE MY LOCATION"}
-              </button>
+            <div className="mt-3">
+              <PlacePicker state={placeState} />
             </div>
-            {geoError && <p className="mt-2 font-mono text-[10px] text-gold">{geoError}</p>}
             <p className="caps mt-3 text-[10px] text-ink/45">Computed in your browser. Your location never leaves this page.</p>
           </div>
 
