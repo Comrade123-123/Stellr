@@ -29,6 +29,8 @@ function sizeText(a: Approach) {
 export default function AsteroidSentinel() {
   const [list, setList] = useState<Approach[]>([]);
   const [load, setLoad] = useState<Load>("loading");
+  /** Why the list failed, as the API reports it, shown small so a screenshot carries it. */
+  const [detail, setDetail] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [elements, setElements] = useState<{ des: string; el: Elements | null; failed: boolean } | null>(null);
   const [view, setView] = useState<View>("flyby");
@@ -41,8 +43,12 @@ export default function AsteroidSentinel() {
     setLoad("loading");
     fetch("/api/asteroids")
       .then(async (res) => {
-        const data = (await res.json()) as { approaches: Approach[]; error?: boolean };
-        if (!res.ok || data.error) throw new Error("asteroids");
+        const data = (await res.json().catch(() => ({ approaches: [], error: true, detail: `HTTP ${res.status}` }))) as {
+          approaches: Approach[];
+          error?: boolean;
+          detail?: string;
+        };
+        if (!res.ok || data.error) throw new Error(data.detail ?? `HTTP ${res.status}`);
         setList(data.approaches);
         setLoad("ready");
         // Start on the next approach to come, or the latest if they've all passed.
@@ -51,7 +57,10 @@ export default function AsteroidSentinel() {
         const next = data.approaches.find((a) => new Date(a.at).getTime() > t) ?? data.approaches[data.approaches.length - 1];
         setSelected((s) => s ?? next?.des ?? null);
       })
-      .catch(() => setLoad("error"));
+      .catch((e: unknown) => {
+        setDetail(e instanceof Error ? e.message : "");
+        setLoad("error");
+      });
   }, []);
   useEffect(() => {
     // The list comes over the network, so it can only load after mount.
@@ -133,7 +142,7 @@ export default function AsteroidSentinel() {
         </div>
       </header>
 
-      <aside className="relative z-10 px-5 pb-10 sm:px-8 lg:absolute lg:bottom-8 lg:right-8 lg:top-28 lg:w-[380px] lg:overflow-y-auto lg:p-0">
+      <aside className="relative z-10 px-5 pb-10 sm:px-8 lg:absolute lg:bottom-8 lg:right-8 lg:top-28 lg:w-[388px] lg:overflow-y-auto lg:overflow-x-hidden lg:p-[4px]">
         <div className="frame bg-void/70 backdrop-blur-md">
           {/* Selected */}
           <div className="border-b border-ink/10 p-5">
@@ -182,6 +191,7 @@ export default function AsteroidSentinel() {
                     RETRY
                   </button>
                 )}
+                {load === "error" && detail && <span className="mt-2 block break-words text-[9px] normal-case tracking-[0.06em] text-ink/35">{detail}</span>}
               </p>
             )}
           </div>

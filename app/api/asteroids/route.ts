@@ -3,7 +3,8 @@ import { AU_KM, type Approach } from "@/lib/asteroids";
 
 /**
  * GET /api/asteroids → asteroids passing Earth within 0.05 AU (about 19.5 lunar distances)
- * from a week ago to 60 days ahead, from JPL's Small-Body Database close-approach API
+ * from a week ago to 60 days ahead (explicit dates: the API takes `now` or YYYY-MM-DD, not offsets
+ * like `now-7`), from JPL's Small-Body Database close-approach API
  * (https://ssd-api.jpl.nasa.gov/doc/cad.html), each flagged if it is also on JPL's Sentry
  * impact-risk list (https://ssd-api.jpl.nasa.gov/doc/sentry.html).
  *
@@ -19,7 +20,15 @@ async function get(path: string): Promise<Record<string, unknown>> {
     headers: { "User-Agent": "Stellr Asteroid Sentinel", Accept: "application/json" },
     signal: AbortSignal.timeout(12_000),
   });
-  if (!res.ok) throw new Error(`${path.split("?")[0]}: ${res.status}`);
+  if (!res.ok) {
+    // JPL explains a refused query in a JSON "message"; keep a short form of it for the page.
+    const body = (await res.text()).slice(0, 300);
+    let message = body;
+    try {
+      message = String((JSON.parse(body) as { message?: unknown }).message ?? body);
+    } catch {}
+    throw new Error(`JPL ${res.status}: ${message.slice(0, 120)}`);
+  }
   return (await res.json()) as Record<string, unknown>;
 }
 
@@ -54,12 +63,15 @@ async function sentry() {
   return map;
 }
 
+/** A UTC calendar date `offset` days from today, as the CAD API wants it (YYYY-MM-DD). */
+const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+
 export async function GET() {
   // Only at request time; builds shouldn't call JPL.
   await connection();
   try {
     const [cad, risks] = await Promise.all([
-      get("/cad.api?dist-max=0.05&date-min=now-7&date-max=%2B60&sort=date&fullname=true&diameter=true"),
+      get(`/cad.api?dist-max=0.05&date-min=${day(-7)}&date-max=${day(60)}&sort=date&fullname=true&diameter=true`),
       sentry(),
     ]);
     const fields = (Array.isArray(cad.fields) ? cad.fields : []).map(String);
@@ -88,7 +100,8 @@ export async function GET() {
       { headers: { "Cache-Control": "public, max-age=900, s-maxage=3600, stale-while-revalidate=21600" } },
     );
   } catch (error) {
-    console.error("[asteroids]", error instanceof Error ? error.message : error);
-    return Response.json({ approaches: [], error: true }, { status: 502, headers: { "Cache-Control": "no-store" } });
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("[asteroids]", detail);
+    return Response.json({ approaches: [], error: true, detail }, { status: 502, headers: { "Cache-Control": "no-store" } });
   }
 }

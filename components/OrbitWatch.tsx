@@ -266,7 +266,7 @@ export default function OrbitWatch() {
         </button>
       </header>
 
-      <aside className="relative z-10 px-5 pb-10 sm:px-8 lg:absolute lg:bottom-8 lg:right-8 lg:top-28 lg:w-[380px] lg:overflow-y-auto lg:p-0">
+      <aside className="relative z-10 px-5 pb-10 sm:px-8 lg:absolute lg:bottom-8 lg:right-8 lg:top-28 lg:w-[388px] lg:overflow-y-auto lg:overflow-x-hidden lg:p-[4px]">
         <div className="frame bg-void/70 backdrop-blur-md">
           {/* What to follow */}
           <div className="border-b border-ink/10 p-5">
