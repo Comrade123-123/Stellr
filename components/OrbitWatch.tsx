@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import type { SwarmStatus } from "@/components/canvas/OrbitScene";
 import ScrambleText from "@/components/ui/ScrambleText";
 import { CITIES, guessCity, type Place } from "@/lib/places";
 import { compass, parseTLE, passes, stateAt, type Pass, type Satellite, type State } from "@/lib/orbits";
@@ -167,6 +168,8 @@ export default function OrbitWatch() {
   const [geoError, setGeoError] = useState("");
   const [locating, setLocating] = useState(false);
   const [follow, setFollow] = useState(true);
+  const [swarm, setSwarm] = useState(false);
+  const [swarmStatus, setSwarmStatus] = useState<SwarmStatus>({ state: "off" });
   const [live, setLive] = useState<State | null>(null);
   const [clock, setClock] = useState(0);
   const [list, setList] = useState<Pass[]>([]);
@@ -264,6 +267,8 @@ export default function OrbitWatch() {
           observer={place}
           follow={follow}
           onUserMove={() => setFollow(false)}
+          swarm={swarm}
+          onSwarmStatus={setSwarmStatus}
         />
       </div>
 
@@ -349,6 +354,31 @@ export default function OrbitWatch() {
             {load === "ready" && live && (live.sunlit ? "IN SUNLIGHT" : "IN EARTH'S SHADOW")}
             {load === "ready" && ` · ${all.length} OBJECTS ON THE GLOBE`}
           </p>
+
+          {/* Every active satellite, on request: thousands of dots, so it starts off. */}
+          <div className="flex items-center justify-between gap-4 border-b border-ink/10 px-4 py-3">
+            <div className="font-mono text-[10px] tracking-[0.2em]">
+              <p className="text-ink/70">ALL ACTIVE SATELLITES</p>
+              <p className="mt-1 text-ink/40">
+                {swarmStatus.state === "loading" && "LOADING THE FULL ACTIVE LIST…"}
+                {swarmStatus.state === "on" && `${swarmStatus.count.toLocaleString("en")} SHOWN · UPDATED EVERY 4 S`}
+                {swarmStatus.state === "error" && "UNAVAILABLE RIGHT NOW"}
+                {swarmStatus.state === "off" && "THOUSANDS OF DOTS · HEAVIER ON OLDER DEVICES"}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={swarm}
+              aria-label="Show all active satellites"
+              onClick={() => setSwarm((v) => !v)}
+              className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${swarm ? "border-gold bg-gold" : "border-ink/30"}`}
+            >
+              <span
+                className={`absolute top-1/2 block h-4 w-4 -translate-y-1/2 rounded-full transition-all ${swarm ? "left-[22px] bg-void" : "left-[3px] bg-ink/70"}`}
+              />
+            </button>
+          </div>
 
           {/* Where the visitor is */}
           <div className="border-b border-ink/10 p-5">

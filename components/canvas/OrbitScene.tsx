@@ -314,6 +314,54 @@ function OrbitTrail({ sat, name }: { sat: Satellite; name: string }) {
 
 /** Keeps the camera over the tracked satellite until the visitor drags the globe. */
 /** On wide screens the panel covers the right of the canvas, so centre the globe in the space left of it. */
+export type SwarmStatus = { state: "off" | "loading" | "error" } | { state: "on"; count: number };
+
+/**
+ * Every active satellite as a faint dot. A Web Worker loads and propagates them every 4 s,
+ * so the thousands of SGP4 runs never stall the page; mounting starts it, unmounting stops it.
+ */
+function Swarm({ onStatus }: { onStatus: (s: SwarmStatus) => void }) {
+  const geometry = useMemo(() => new THREE.BufferGeometry(), []);
+  const material = useMemo(
+    () =>
+      new THREE.PointsMaterial({
+        color: new THREE.Color(0.62, 0.72, 0.9),
+        size: 1.6,
+        sizeAttenuation: false,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+      }),
+    [],
+  );
+  const status = useRef(onStatus);
+  useEffect(() => {
+    status.current = onStatus;
+  }, [onStatus]);
+
+  useEffect(() => {
+    const worker = new Worker(new URL("../../lib/swarm.worker.ts", import.meta.url), { type: "module" });
+    status.current({ state: "loading" });
+    worker.onmessage = (e: MessageEvent) => {
+      const msg = e.data as { type: "loaded"; count: number } | { type: "positions"; positions: Float32Array } | { type: "error" };
+      if (msg.type === "loaded") status.current({ state: "on", count: msg.count });
+      if (msg.type === "error") status.current({ state: "error" });
+      if (msg.type === "positions") {
+        geometry.setAttribute("position", new THREE.BufferAttribute(msg.positions, 3));
+        geometry.computeBoundingSphere();
+      }
+    };
+    worker.onerror = () => status.current({ state: "error" });
+    worker.postMessage({ type: "start" });
+    return () => {
+      worker.terminate();
+      status.current({ state: "off" });
+    };
+  }, [geometry]);
+
+  return <points geometry={geometry} material={material} frustumCulled={false} renderOrder={1} />;
+}
+
 function MakeRoomForPanel() {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const size = useThree((s) => s.size);
@@ -355,6 +403,8 @@ export default function OrbitScene({
   observer,
   follow,
   onUserMove,
+  swarm,
+  onSwarmStatus,
 }: {
   sats: Satellite[];
   tracked: Satellite | null;
@@ -362,6 +412,8 @@ export default function OrbitScene({
   observer: Observer | null;
   follow: boolean;
   onUserMove: () => void;
+  swarm: boolean;
+  onSwarmStatus: (s: SwarmStatus) => void;
 }) {
   const controls = useRef<OrbitControlsImpl | null>(null);
   return (
@@ -377,6 +429,7 @@ export default function OrbitScene({
     >
       <Stars />
       <Earth observer={observer} />
+      {swarm && <Swarm onStatus={onSwarmStatus} />}
       {sats.length > 0 && <Satellites sats={sats} tracked={tracked} />}
       {tracked && <OrbitTrail sat={tracked} name={trackedName} />}
       <MakeRoomForPanel />

@@ -1,6 +1,6 @@
 /**
  * CelesTrak two-line elements, passed through:
- *   GET /api/tle?group=stations|visual  → a whole group
+ *   GET /api/tle?group=stations|visual|active → a whole group (active: every working satellite, thousands)
  *   GET /api/tle?name=starlink-1007     → objects whose name contains the text (at least 3 characters)
  *   GET /api/tle?catnr=25544            → one object by NORAD catalogue number
  *
@@ -9,7 +9,7 @@
  * serves the old one while it refreshes. CELESTRAK_BASE exists only so tests can point
  * this at a local stand-in.
  */
-const GROUPS = new Set(["stations", "visual"]);
+const GROUPS = new Set(["stations", "visual", "active"]);
 const BASE = process.env.CELESTRAK_BASE ?? "https://celestrak.org";
 /** Most objects a name search returns; "starlink" alone would otherwise be thousands. */
 const MAX_RESULTS = 25;
