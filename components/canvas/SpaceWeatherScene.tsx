@@ -92,7 +92,7 @@ const sunFragment = /* glsl */ `
     vec3 base = mix(vec3(1.0, 0.42, 0.08), vec3(1.0, 0.82, 0.45), cells * 0.8 + fine * 0.35);
     base *= 1.0 - spots * 0.35 * (1.0 - fine);
     base += vec3(1.0, 0.9, 0.7) * spots * fine * uFlare * 1.5;
-    vec3 col = base * limb * (1.4 + uFlare * 0.8);
+    vec3 col = base * limb * (1.1 + uFlare * 0.6);
     gl_FragColor = vec4(col, 1.0);
     #include <colorspace_fragment>
   }
@@ -114,7 +114,7 @@ const glowFragment = /* glsl */ `
     float streak = 0.6 + 0.4 * sin(a * 9.0 + sin(a * 3.0 + uTime * 0.1) * 2.0);
     float glow = exp(-max(r - 0.3, 0.0) * mix(7.0, 4.0, uFlare)) * (0.5 + 0.5 * streak);
     glow *= 1.0 - smoothstep(0.85, 1.0, r);
-    vec3 col = mix(vec3(1.0, 0.55, 0.2), vec3(1.0, 0.9, 0.75), uFlare) * glow * (0.9 + uFlare * 1.2);
+    vec3 col = mix(vec3(1.0, 0.55, 0.2), vec3(1.0, 0.9, 0.75), uFlare) * glow * (0.6 + uFlare * 0.9);
     gl_FragColor = vec4(col, glow);
   }
 `;
@@ -232,7 +232,9 @@ const auroraFragment = /* glsl */ `
     float v = texture2D(uGrid, st).r;          // 0–1 (0–100%)
     float night = smoothstep(0.15, -0.2, dot(normalize(vNormal), normalize(uSun)));
     float curtain = 0.55 + 0.45 * n2(vec2(lonE * 0.35 + uTime * 0.25, lat * 2.0 - uTime * 0.6));
-    float a = smoothstep(0.03, 0.5, v) * curtain * night;
+    // OVATION values are probabilities, and a quiet night peaks around 5–20%, so even small ones
+    // must show; strength then grows with the chance.
+    float a = smoothstep(0.015, 0.12, v) * (0.45 + 0.55 * smoothstep(0.1, 0.6, v)) * curtain * night;
     vec3 green = vec3(0.25, 1.0, 0.55);
     vec3 red = vec3(1.0, 0.25, 0.45);
     vec3 col = uLayer < 0.5 ? mix(green, vec3(0.5, 1.0, 0.7), smoothstep(0.6, 1.0, v) * 0.6) : red * smoothstep(0.45, 0.95, v);
