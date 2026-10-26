@@ -23,6 +23,8 @@ export interface Launch {
   /** False when only the day (or month) is known, not the time. */
   timeKnown: boolean;
   provider: string;
+  /** Short name, e.g. ISRO, CASC, NASA; empty when the API has none. */
+  providerAbbrev: string;
   rocket: string;
   mission: string;
   orbit: string;
@@ -57,6 +59,7 @@ function trim(raw: Json): Launch | null {
     // Precision "SEC"/"MIN"/"HR" or none means a real time; "DAY", "MONTH", "Q1"… mean only a rough date.
     timeKnown: !precision || ["SEC", "MIN", "HR", "S", "M", "H"].includes(precision),
     provider: str(obj(raw.launch_service_provider).name),
+    providerAbbrev: str(obj(raw.launch_service_provider).abbrev),
     rocket: str(rocket.full_name) || str(rocket.name),
     mission: str(mission.description),
     orbit: str(obj(mission.orbit).name),

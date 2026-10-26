@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { Launch } from "@/app/api/launches/route";
 import PlacePicker, { usePlace } from "@/components/PlacePicker";
@@ -69,10 +69,20 @@ async function launchEvents(): Promise<SkyEvent[]> {
     url: l.video ?? undefined,
     status: l.status,
     timeKnown: l.timeKnown,
+    keywords: l.providerAbbrev,
   }));
 }
 
-type Shown = SkyEvent & { status?: string; timeKnown?: boolean };
+type Shown = SkyEvent & { status?: string; timeKnown?: boolean; /** Extra words search should find, like ISRO for its full name. */ keywords?: string };
+
+/** True when every word of the query appears somewhere in the event: its name, description, kind or month. */
+function matches(e: Shown, words: string[], timeZone?: string) {
+  if (!words.length) return true;
+  const text = [e.title, e.detail, e.howTo ?? "", e.keywords ?? "", KIND_LABEL[e.kind], fmt(e.at, { month: "long", year: "numeric" }, timeZone)]
+    .join(" ")
+    .toLowerCase();
+  return words.every((w) => text.includes(w));
+}
 
 function fmt(date: Date, opts: Intl.DateTimeFormatOptions, timeZone?: string) {
   return new Intl.DateTimeFormat("en-GB", { ...opts, timeZone }).format(date).toUpperCase();
@@ -166,6 +176,9 @@ export default function SkyEvents() {
   const { place } = placeState;
   const [filter, setFilter] = useState<EventKind | "all">("all");
   const [onlyVisible, setOnlyVisible] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const searchBox = useRef<HTMLInputElement>(null);
   const [computed, setComputed] = useState<SkyEvent[] | null>(null);
   const [iss, setIss] = useState<{ load: Load; events: SkyEvent[] }>({ load: "loading", events: [] });
   const [launches, setLaunches] = useState<{ load: Load; events: Shown[] }>({ load: "loading", events: [] });
@@ -214,7 +227,14 @@ export default function SkyEvents() {
       .sort((a, b) => a.at.getTime() - b.at.getTime());
   }, [computed, iss.events, launches.events, now]);
 
-  const shown = all.filter((e) => (filter === "all" || e.kind === filter) && (!onlyVisible || e.visible !== false));
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = all.filter(
+    (e) => (filter === "all" || e.kind === filter) && (!onlyVisible || e.visible !== false) && matches(e, words, place?.timeZone),
+  );
+  const closeSearch = () => {
+    setQuery("");
+    setSearchOpen(false);
+  };
   const week = shown.filter((e) => e.at.getTime() < now + 7 * DAY);
   const later = shown.filter((e) => e.at.getTime() >= now + 7 * DAY);
   const tz = place?.timeZone;
@@ -271,6 +291,27 @@ export default function SkyEvents() {
               {f.label}
             </button>
           ))}
+          <button
+            type="button"
+            aria-expanded={searchOpen}
+            aria-controls="event-search"
+            onClick={() => {
+              if (searchOpen) closeSearch();
+              else {
+                setSearchOpen(true);
+                setTimeout(() => searchBox.current?.focus(), 0);
+              }
+            }}
+            className={`flex items-center gap-2 rounded-full border px-4 py-1.5 font-mono text-[10px] tracking-[0.2em] transition-colors ${
+              searchOpen ? "border-gold text-gold" : "border-ink/25 text-ink/70 hover:border-ink/60"
+            }`}
+          >
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden>
+              <circle cx="5" cy="5" r="4" stroke="currentColor" strokeWidth="1.3" />
+              <path d="M8 8l3 3" stroke="currentColor" strokeWidth="1.3" />
+            </svg>
+            SEARCH
+          </button>
           <label className="ml-auto flex cursor-pointer items-center gap-3 font-mono text-[10px] tracking-[0.18em] text-ink/60">
             <input
               type="checkbox"
@@ -280,6 +321,32 @@ export default function SkyEvents() {
             />
             ONLY WHAT I CAN SEE
           </label>
+          {searchOpen && (
+            <div id="event-search" className="mt-3 flex w-full items-center gap-4">
+              <div className="relative flex-1">
+                <label htmlFor="event-search-input" className="sr-only">
+                  Search events
+                </label>
+                <input
+                  ref={searchBox}
+                  id="event-search-input"
+                  type="search"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Escape" && closeSearch()}
+                  placeholder="PERSEIDS, MARS, ECLIPSE, ISRO, FALCON, DECEMBER…"
+                  className="h-10 w-full rounded-full border border-ink/25 bg-void px-5 font-mono text-[11px] tracking-[0.12em] text-ink outline-none placeholder:text-ink/35 focus:border-ink/60"
+                />
+              </div>
+              {words.length > 0 && (
+                <span className="shrink-0 font-mono text-[10px] tracking-[0.18em] text-ink/50" aria-live="polite">
+                  {shown.length} {shown.length === 1 ? "MATCH" : "MATCHES"}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {!computed ? (
@@ -295,10 +362,17 @@ export default function SkyEvents() {
                   ))}
                 </ul>
               ) : (
-                <p className="caps py-6 text-[12px] text-ink/50">Nothing of this kind in the next seven days.</p>
+                <p className="caps py-6 text-[12px] text-ink/50">
+                  {words.length ? "No matches in the next seven days." : "Nothing of this kind in the next seven days."}
+                </p>
               )}
             </section>
 
+            {words.length > 0 && shown.length === 0 && (
+              <p className="caps mt-10 text-[12px] text-ink/50">
+                Nothing in the next year matches “{query.trim()}”. Try a shower, a planet, a rocket or a month.
+              </p>
+            )}
             {[...months].map(([month, events]) => (
               <section key={month} className="mt-14">
                 <h2 className="font-mono text-[11px] tracking-[0.22em] text-ink/50">{month}</h2>
