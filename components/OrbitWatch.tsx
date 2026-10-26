@@ -20,6 +20,119 @@ const TRACKABLE: { id: number; label: string }[] = [
 
 type Load = "loading" | "ready" | "error";
 
+/** Upper-cased, with CelesTrak's bracketed suffixes kept: "STARLINK-1007", "ISS (ZARYA)". */
+const display = (sat: Satellite) => sat.name.toUpperCase();
+
+/** Looks a satellite up in CelesTrak's full catalogue by NORAD number or by part of its name. */
+async function searchCatalogue(text: string): Promise<Satellite[]> {
+  const param = /^\d+$/.test(text) ? `catnr=${text}` : `name=${encodeURIComponent(text)}`;
+  const res = await fetch(`/api/tle?${param}`);
+  if (!res.ok) throw new Error(String(res.status));
+  return parseTLE(await res.text());
+}
+
+/**
+ * Find any satellite by name or NORAD number: matches from the objects already on the
+ * globe show at once, the full catalogue is searched after a short pause in typing.
+ */
+function SatelliteSearch({ onBoard, onPick }: { onBoard: Satellite[]; onPick: (sat: Satellite) => void }) {
+  const [text, setText] = useState("");
+  const [open, setOpen] = useState(false);
+  const [remote, setRemote] = useState<{ for: string; sats: Satellite[]; failed: boolean } | null>(null);
+  const q = text.trim();
+  const numeric = /^\d+$/.test(q);
+
+  const local = useMemo(() => {
+    if (!q) return [];
+    const needle = q.toUpperCase();
+    return onBoard.filter((s) => (numeric ? String(s.id).startsWith(q) : s.name.toUpperCase().includes(needle))).slice(0, 8);
+  }, [onBoard, q, numeric]);
+
+  useEffect(() => {
+    if (q.length < (numeric ? 1 : 3)) return;
+    let cancelled = false;
+    const id = setTimeout(() => {
+      searchCatalogue(q)
+        .then((sats) => !cancelled && setRemote({ for: q, sats, failed: false }))
+        .catch(() => !cancelled && setRemote({ for: q, sats: [], failed: true }));
+    }, 450);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [q, numeric]);
+
+  const fresh = remote?.for === q ? remote : null;
+  const seen = new Set(local.map((s) => s.id));
+  const more = (fresh?.sats ?? []).filter((s) => !seen.has(s.id)).slice(0, 12);
+  const searching = q.length >= (numeric ? 1 : 3) && !fresh;
+  const results = [...local, ...more];
+
+  const pick = (sat: Satellite) => {
+    onPick(sat);
+    setText("");
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <label htmlFor="sat-search" className="sr-only">
+        Find a satellite by name or NORAD number
+      </label>
+      <input
+        id="sat-search"
+        type="search"
+        autoComplete="off"
+        spellCheck={false}
+        placeholder="FIND A SATELLITE · NAME OR NORAD NO."
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && results[0]) pick(results[0]);
+          if (e.key === "Escape") setOpen(false);
+        }}
+        className="h-10 w-full rounded-full border border-ink/25 bg-void px-4 font-mono text-[11px] tracking-[0.12em] text-ink outline-none placeholder:text-ink/35 focus:border-ink/60"
+      />
+      {open && q && (
+        <ul
+          role="listbox"
+          className="absolute inset-x-0 top-12 z-20 max-h-72 overflow-y-auto border border-ink/15 bg-void/95 backdrop-blur-md"
+        >
+          {results.map((s) => (
+            <li key={s.id} role="option" aria-selected={false}>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(s)}
+                className="flex w-full items-baseline justify-between gap-4 px-4 py-2.5 text-left font-mono text-[11px] tracking-[0.1em] text-ink/85 transition-colors hover:bg-ink/5 hover:text-gold"
+              >
+                <span className="truncate">{display(s)}</span>
+                <span className="shrink-0 text-[10px] text-ink/40">#{s.id}</span>
+              </button>
+            </li>
+          ))}
+          <li className="px-4 py-2.5 font-mono text-[10px] tracking-[0.15em] text-ink/40">
+            {searching
+              ? "SEARCHING THE FULL CATALOGUE…"
+              : fresh?.failed
+                ? "CATALOGUE SEARCH UNAVAILABLE"
+                : q.length < 3 && !numeric
+                  ? "TYPE 3 LETTERS TO SEARCH THE FULL CATALOGUE"
+                  : results.length
+                    ? `${results.length} FOUND`
+                    : "NO SATELLITE BY THAT NAME OR NUMBER"}
+          </li>
+        </ul>
+      )}
+    </div>
+  );
+}
+
 async function loadSatellites(): Promise<Satellite[]> {
   const groups = await Promise.all(
     ["stations", "visual"].map(async (group) => {
@@ -57,6 +170,8 @@ export default function OrbitWatch() {
   const [live, setLive] = useState<State | null>(null);
   const [clock, setClock] = useState(0);
   const [list, setList] = useState<Pass[]>([]);
+  /** Satellites found by search that aren't in the loaded groups; drawn and trackable like the rest. */
+  const [extra, setExtra] = useState<Satellite[]>([]);
 
   const fetchAll = useCallback(() => {
     setLoad("loading");
@@ -75,8 +190,16 @@ export default function OrbitWatch() {
     fetchAll();
   }, [fetchAll]);
 
+  const all = useMemo(() => [...sats, ...extra], [sats, extra]);
   const options = useMemo(() => TRACKABLE.filter((t) => sats.some((s) => s.id === t.id)), [sats]);
-  const tracked = useMemo(() => sats.find((s) => s.id === trackedId) ?? null, [sats, trackedId]);
+  const tracked = useMemo(() => all.find((s) => s.id === trackedId) ?? null, [all, trackedId]);
+  const custom = tracked && !TRACKABLE.some((t) => t.id === tracked.id) ? tracked : null;
+
+  const pick = (sat: Satellite) => {
+    if (!sats.some((s) => s.id === sat.id)) setExtra((xs) => [...xs.filter((x) => x.id !== sat.id), sat]);
+    setTrackedId(sat.id);
+    setFollow(true);
+  };
 
   // Live readout, once a second.
   useEffect(() => {
@@ -128,13 +251,14 @@ export default function OrbitWatch() {
 
   const tz = place?.timeZone;
   const label = TRACKABLE.find((t) => t.id === trackedId)?.label ?? tracked?.name ?? "";
+  const noOrbit = tracked && !live;
 
   return (
     <main className="relative min-h-svh bg-void text-ink lg:h-svh lg:overflow-hidden">
       {/* Globe: fills the screen on desktop, the top of it on phones. */}
       <div className="relative h-[58svh] w-full lg:absolute lg:inset-0 lg:h-full">
         <OrbitScene
-          sats={sats}
+          sats={all}
           tracked={tracked}
           trackedName={label}
           observer={place}
@@ -160,29 +284,41 @@ export default function OrbitWatch() {
             follow ? "border-gold text-gold" : "border-ink/30 text-ink/70 hover:border-ink/60"
           }`}
         >
-          {follow ? "● FOLLOWING" : "FOLLOW"} <span className="hidden sm:inline">{label.toUpperCase()}</span>
+          {follow ? "● FOLLOWING" : "FOLLOW"}{" "}
+          <span className="hidden max-w-[24ch] truncate align-bottom sm:inline-block">{label.toUpperCase()}</span>
         </button>
       </header>
 
       <aside className="relative z-10 px-5 pb-10 sm:px-8 lg:absolute lg:bottom-8 lg:right-8 lg:top-28 lg:w-[380px] lg:overflow-y-auto lg:p-0">
         <div className="frame bg-void/70 backdrop-blur-md">
           {/* What to follow */}
-          <div className="flex flex-wrap gap-2 border-b border-ink/10 p-5">
-            {(options.length ? options : TRACKABLE.slice(0, 1)).map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                onClick={() => {
-                  setTrackedId(o.id);
-                  setFollow(true);
-                }}
-                className={`rounded-full border px-4 py-1.5 font-mono text-[10px] tracking-[0.2em] transition-colors ${
-                  o.id === trackedId ? "border-gold bg-gold text-void" : "border-ink/25 text-ink/70 hover:border-ink/60"
-                }`}
-              >
-                {o.label.toUpperCase()}
-              </button>
-            ))}
+          <div className="border-b border-ink/10 p-5">
+            <SatelliteSearch onBoard={all} onPick={pick} />
+            <div className="mt-4 flex flex-wrap gap-2">
+              {(options.length ? options : TRACKABLE.slice(0, 1)).map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => {
+                    setTrackedId(o.id);
+                    setFollow(true);
+                  }}
+                  className={`rounded-full border px-4 py-1.5 font-mono text-[10px] tracking-[0.2em] transition-colors ${
+                    o.id === trackedId ? "border-gold bg-gold text-void" : "border-ink/25 text-ink/70 hover:border-ink/60"
+                  }`}
+                >
+                  {o.label.toUpperCase()}
+                </button>
+              ))}
+              {custom && (
+                <span className="max-w-full truncate rounded-full border border-gold bg-gold px-4 py-1.5 font-mono text-[10px] tracking-[0.2em] text-void">
+                  {display(custom)}
+                </span>
+              )}
+            </div>
+            {custom && (
+              <p className="mt-3 font-mono text-[10px] tracking-[0.15em] text-ink/45">NORAD #{custom.id}</p>
+            )}
           </div>
 
           {/* Live state */}
@@ -209,8 +345,9 @@ export default function OrbitWatch() {
                 </button>
               </>
             )}
+            {load === "ready" && noOrbit && "NO CURRENT ORBIT · IT MAY HAVE RE-ENTERED"}
             {load === "ready" && live && (live.sunlit ? "IN SUNLIGHT" : "IN EARTH'S SHADOW")}
-            {load === "ready" && ` · ${sats.length} OBJECTS ON THE GLOBE`}
+            {load === "ready" && ` · ${all.length} OBJECTS ON THE GLOBE`}
           </p>
 
           {/* Where the visitor is */}
