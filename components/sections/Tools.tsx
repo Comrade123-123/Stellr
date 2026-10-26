@@ -18,6 +18,7 @@ const TOOLS: { name: string; body: string; tags: string[]; href?: string }[] = [
     name: "Asteroid Sentinel",
     body: "Every near-Earth object on approach — distance, size and closest pass, plotted in 3D.",
     tags: ["NEO", "CLOSE APPROACH", "HAZARD"],
+    href: "/asteroid-sentinel",
   },
   {
     name: "Sky Events",
