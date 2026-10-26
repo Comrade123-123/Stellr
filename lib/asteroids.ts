@@ -150,3 +150,34 @@ export function flyby(el: Elements, near: Date, days = 4): Flyby {
   }
   return { path, closest: best };
 }
+
+/**
+ * Positions of many asteroids at once, for the hazardous-asteroid layer: `orbits` holds
+ * `stride` numbers per object (epoch JD, a, e, i, om, w, ma, …), and scene coordinates
+ * (ecliptic x, z, −y, times `scale`) are written into `out`. Same Kepler solution as
+ * asteroidAt, without allocating, since it runs every frame for a few thousand objects.
+ */
+export function swarmAt(orbits: ArrayLike<number>, stride: number, date: Date, scale: number, out: Float32Array) {
+  const t = jd(date);
+  for (let k = 0, o = 0; o + 6 < orbits.length; k += 3, o += stride) {
+    const a = orbits[o + 1];
+    const e = orbits[o + 2];
+    let m = orbits[o + 6] * DEG + (K / Math.pow(a, 1.5)) * (t - orbits[o]);
+    m = ((m % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+    let E = e < 0.8 ? m : Math.PI * Math.sign(m || 1);
+    for (let n = 0; n < 12; n++) {
+      const d = (E - e * Math.sin(E) - m) / (1 - e * Math.cos(E));
+      E -= d;
+      if (Math.abs(d) < 1e-9) break;
+    }
+    const x = a * (Math.cos(E) - e);
+    const y = a * Math.sqrt(1 - e * e) * Math.sin(E);
+    const i = orbits[o + 3] * DEG;
+    const om = orbits[o + 4] * DEG;
+    const w = orbits[o + 5] * DEG;
+    const cw = Math.cos(w), sw = Math.sin(w), co = Math.cos(om), so = Math.sin(om), ci = Math.cos(i), si = Math.sin(i);
+    out[k] = ((co * cw - so * sw * ci) * x + (-co * sw - so * cw * ci) * y) * scale;
+    out[k + 1] = (sw * si * x + cw * si * y) * scale;
+    out[k + 2] = -((so * cw + co * sw * ci) * x + (-so * sw + co * cw * ci) * y) * scale;
+  }
+}

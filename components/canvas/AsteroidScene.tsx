@@ -6,7 +6,7 @@ import { Html, OrbitControls, useTexture } from "@react-three/drei";
 import { GeoMoon } from "astronomy-engine";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import { asteroidAt, earthAt, flyby, LD_KM, orbitPath, type Elements } from "@/lib/asteroids";
+import { asteroidAt, earthAt, flyby, LD_KM, orbitPath, swarmAt, type Elements } from "@/lib/asteroids";
 import { MakeRoomForPanel, Stars } from "./OrbitScene";
 
 /*
@@ -14,7 +14,8 @@ import { MakeRoomForPanel, Stars } from "./OrbitScene";
  *  - flyby: Earth-centred, 1 lunar distance = 10 units, the true path past Earth over
  *    a few days either side of closest approach, with the Moon where it really is;
  *  - orbit: Sun-centred, 1 AU = 10 units, the asteroid's orbit against Earth's and the
- *    other inner planets', the two bodies racing towards the encounter.
+ *    other inner planets', the two bodies racing towards the encounter; optionally with
+ *    every known potentially hazardous asteroid as a moving dot around them.
  * Ecliptic coordinates map to the scene as (x, z, −y): ecliptic north is up.
  */
 
@@ -31,6 +32,8 @@ const OBLIQUITY = (23.439291 * Math.PI) / 180;
 const toScene = (v: [number, number, number], scale: number) => new THREE.Vector3(v[0] * scale, v[2] * scale, -v[1] * scale);
 
 export type View = "flyby" | "orbit";
+/** Orbits for the hazardous layer: `stride` numbers per asteroid, as /api/asteroids/hazardous sends them. */
+export type Swarm = { stride: number; orbits: Float64Array };
 
 function Label({ text, accent = false, below = false }: { text: string; accent?: boolean; below?: boolean }) {
   return (
@@ -156,8 +159,35 @@ const INNER: [string, number][] = [
   ["MARS", 1.524],
 ];
 
-/** Sun-centred: the asteroid's orbit and Earth's, both bodies moving through the weeks around the encounter. */
-function OrbitView({ el, at, reducedMotion }: { el: Elements; at: Date; reducedMotion: boolean }) {
+/** Every hazardous asteroid as a faint dot, placed by the orbit view's clock. */
+function useSwarm(swarm: Swarm | null) {
+  return useMemo(() => {
+    if (!swarm) return null;
+    const count = Math.floor(swarm.orbits.length / swarm.stride);
+    const g = new THREE.BufferGeometry();
+    const position = new THREE.BufferAttribute(new Float32Array(count * 3), 3);
+    position.setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute("position", position);
+    const m = new THREE.PointsMaterial({
+      color: new THREE.Color("#ff6a3d"),
+      size: 2.2,
+      sizeAttenuation: false,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const points = new THREE.Points(g, m);
+    points.frustumCulled = false;
+    return { points, position, swarm };
+  }, [swarm]);
+}
+
+/**
+ * Sun-centred: the asteroid's orbit and Earth's, both bodies moving through the weeks around
+ * the encounter, or around today for an asteroid looked up that has no pass coming (`approach` false).
+ */
+function OrbitView({ el, at, approach, swarm, reducedMotion }: { el: Elements; at: Date; approach: boolean; swarm: Swarm | null; reducedMotion: boolean }) {
   const orbit = useMemo(() => orbitPath(el).map((p) => toScene(p, AU)), [el]);
   const earthOrbit = useMemo(() => {
     const pts: THREE.Vector3[] = [];
@@ -167,6 +197,7 @@ function OrbitView({ el, at, reducedMotion }: { el: Elements; at: Date; reducedM
   const earth = useRef<THREE.Group>(null);
   const rock = useRef<THREE.Group>(null);
   const date = useRef<HTMLSpanElement>(null);
+  const dots = useSwarm(swarm);
 
   useFrame(({ clock }) => {
     // 90 days before the approach to 30 after, in 12 s.
@@ -174,9 +205,15 @@ function OrbitView({ el, at, reducedMotion }: { el: Elements; at: Date; reducedM
     const t = new Date(at.getTime() + (-90 + f * 120) * 86_400_000);
     earth.current?.position.copy(toScene(earthAt(t), AU));
     rock.current?.position.copy(toScene(asteroidAt(el, t), AU));
+    if (dots) {
+      swarmAt(dots.swarm.orbits, dots.swarm.stride, t, AU, dots.position.array as Float32Array);
+      dots.position.needsUpdate = true;
+    }
     if (date.current) {
       const days = Math.round((t.getTime() - at.getTime()) / 86_400_000);
-      date.current.textContent = `${t.toISOString().slice(0, 10)} · ${days === 0 ? "CLOSEST APPROACH" : days < 0 ? `${-days} DAYS BEFORE` : `${days} DAYS AFTER`}`;
+      date.current.textContent = approach
+        ? `${t.toISOString().slice(0, 10)} · ${days === 0 ? "CLOSEST APPROACH" : days < 0 ? `${-days} DAYS BEFORE` : `${days} DAYS AFTER`}`
+        : `${t.toISOString().slice(0, 10)} · ${days === 0 ? "TODAY" : days < 0 ? `${-days} DAYS AGO` : `IN ${days} DAYS`}`;
     }
   });
 
@@ -192,6 +229,7 @@ function OrbitView({ el, at, reducedMotion }: { el: Elements; at: Date; reducedM
         <Line key={name} points={circle(r * AU)} color={new THREE.Color(0.8, 0.85, 0.95)} opacity={0.12} />
       ))}
       <Line points={earthOrbit} color={GOLD} opacity={0.55} />
+      {dots && <primitive object={dots.points} />}
       <Line points={orbit} color={ROCK} opacity={0.8} />
       <group ref={earth}>
         <mesh scale={0.22}>
@@ -246,7 +284,21 @@ function Frame({ view, el, at, controls }: { view: View; el: Elements; at: Date;
   return null;
 }
 
-export default function AsteroidScene({ el, at, view, reducedMotion }: { el: Elements | null; at: Date | null; view: View; reducedMotion: boolean }) {
+export default function AsteroidScene({
+  el,
+  at,
+  approach = true,
+  view,
+  swarm = null,
+  reducedMotion,
+}: {
+  el: Elements | null;
+  at: Date | null;
+  approach?: boolean;
+  view: View;
+  swarm?: Swarm | null;
+  reducedMotion: boolean;
+}) {
   const controls = useRef<OrbitControlsImpl | null>(null);
   return (
     <Canvas
@@ -257,7 +309,7 @@ export default function AsteroidScene({ el, at, view, reducedMotion }: { el: Ele
     >
       <Stars />
       {el && at && view === "flyby" && <FlybyView el={el} at={at} reducedMotion={reducedMotion} />}
-      {el && at && view === "orbit" && <OrbitView el={el} at={at} reducedMotion={reducedMotion} />}
+      {el && at && view === "orbit" && <OrbitView el={el} at={at} approach={approach} swarm={swarm} reducedMotion={reducedMotion} />}
       {el && at && <Frame view={view} el={el} at={at} controls={controls} />}
       <MakeRoomForPanel />
       <OrbitControls ref={controls} enablePan={false} enableDamping dampingFactor={0.08} rotateSpeed={0.5} minDistance={0.5} maxDistance={85} />
