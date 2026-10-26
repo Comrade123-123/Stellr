@@ -1,15 +1,18 @@
 "use client";
 
 import { useRef } from "react";
+import Link from "next/link";
 import { useReveal } from "@/components/ui/useReveal";
 import IndexBar from "@/components/ui/IndexBar";
+import ScrambleText from "@/components/ui/ScrambleText";
 import SplitWords from "@/components/ui/SplitWords";
 
-const TOOLS = [
+const TOOLS: { name: string; body: string; tags: string[]; href?: string }[] = [
   {
     name: "Orbit Watch",
     body: "Track satellites and the ISS live, with pass predictions for wherever you're standing.",
     tags: ["SATELLITES", "ISS", "PASS PREDICTION"],
+    href: "/orbit-watch",
   },
   {
     name: "Asteroid Sentinel",
@@ -54,7 +57,12 @@ export default function Tools() {
         <ul className="mt-12 grid gap-5 sm:grid-cols-2">
           {TOOLS.map((tool, i) => (
             <li key={tool.name} className="reveal-fade frame bg-void/55 p-6 backdrop-blur-sm sm:p-7">
-              <span className="font-mono text-xs tracking-[0.15em] text-gold">[{String(i + 1).padStart(2, "0")}]</span>
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-xs tracking-[0.15em] text-gold">[{String(i + 1).padStart(2, "0")}]</span>
+                <span className={`font-mono text-[10px] tracking-[0.18em] ${tool.href ? "text-gold" : "text-ink/40"}`}>
+                  {tool.href ? "● LIVE" : "COMING SOON"}
+                </span>
+              </div>
               <h3 className="display mt-5 text-xl text-ink">{tool.name}</h3>
               <p className="mt-4 text-[15px] leading-relaxed text-ink/70">{tool.body}</p>
               <ul className="mt-6 flex flex-wrap gap-2">
@@ -64,6 +72,14 @@ export default function Tools() {
                   </li>
                 ))}
               </ul>
+              {tool.href && (
+                <Link
+                  href={tool.href}
+                  className="mt-6 inline-block rounded-full bg-ink px-5 py-2.5 text-[12px] font-semibold tracking-[0.08em] text-void transition-colors hover:bg-gold"
+                >
+                  <ScrambleText text={`OPEN ${tool.name.toUpperCase()} →`} />
+                </Link>
+              )}
             </li>
           ))}
         </ul>

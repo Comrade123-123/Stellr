@@ -1,0 +1,300 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import Link from "next/link";
+import ScrambleText from "@/components/ui/ScrambleText";
+import { CITIES, guessCity, type Place } from "@/lib/places";
+import { compass, parseTLE, passes, stateAt, type Pass, type Satellite, type State } from "@/lib/orbits";
+
+const OrbitScene = dynamic(() => import("@/components/canvas/OrbitScene"), { ssr: false });
+
+const MY_LOCATION = "__here";
+
+/** The objects worth following by name; the rest are dots. NORAD numbers. */
+const TRACKABLE: { id: number; label: string }[] = [
+  { id: 25544, label: "ISS" },
+  { id: 48274, label: "Tiangong" },
+  { id: 20580, label: "Hubble" },
+];
+
+type Load = "loading" | "ready" | "error";
+
+async function loadSatellites(): Promise<Satellite[]> {
+  const groups = await Promise.all(
+    ["stations", "visual"].map(async (group) => {
+      const res = await fetch(`/api/tle?group=${group}`);
+      if (!res.ok) throw new Error(`${group}: ${res.status}`);
+      return parseTLE(await res.text());
+    }),
+  );
+  const seen = new Set<number>();
+  return groups.flat().filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
+}
+
+function time(date: Date, timeZone?: string) {
+  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", timeZone }).format(date);
+}
+function day(date: Date, timeZone?: string) {
+  return new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "2-digit", month: "short", timeZone })
+    .format(date)
+    .toUpperCase();
+}
+const fixed = (n: number, digits = 2) => n.toFixed(digits);
+const latLabel = (lat: number) => `${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? "N" : "S"}`;
+const lonLabel = (lon: number) => `${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? "E" : "W"}`;
+
+/** Orbit Watch: live satellites on a real-time globe, and the next passes over the visitor. */
+export default function OrbitWatch() {
+  const [sats, setSats] = useState<Satellite[]>([]);
+  const [load, setLoad] = useState<Load>("loading");
+  const [trackedId, setTrackedId] = useState(25544);
+  const [place, setPlace] = useState<Place | null>(null);
+  const [here, setHere] = useState<Place | null>(null);
+  const [geoError, setGeoError] = useState("");
+  const [locating, setLocating] = useState(false);
+  const [follow, setFollow] = useState(true);
+  const [live, setLive] = useState<State | null>(null);
+  const [clock, setClock] = useState(0);
+  const [list, setList] = useState<Pass[]>([]);
+
+  const fetchAll = useCallback(() => {
+    setLoad("loading");
+    loadSatellites()
+      .then((s) => {
+        setSats(s);
+        setLoad(s.length ? "ready" : "error");
+      })
+      .catch(() => setLoad("error"));
+  }, []);
+
+  useEffect(() => {
+    // Both need the browser: the time zone for a first guess, and the network for elements.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPlace(guessCity());
+    fetchAll();
+  }, [fetchAll]);
+
+  const options = useMemo(() => TRACKABLE.filter((t) => sats.some((s) => s.id === t.id)), [sats]);
+  const tracked = useMemo(() => sats.find((s) => s.id === trackedId) ?? null, [sats, trackedId]);
+
+  // Live readout, once a second.
+  useEffect(() => {
+    if (!tracked) return;
+    const tick = () => {
+      const t = new Date();
+      setLive(stateAt(tracked, t));
+      setClock(t.getTime());
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [tracked]);
+
+  // Passes for the next three days, refreshed every five minutes so finished ones drop off.
+  useEffect(() => {
+    if (!tracked || !place) return;
+    const run = () => setList(passes(tracked, place, new Date(Date.now() - 15 * 60_000), 72).filter((p) => p.end.getTime() > Date.now()));
+    run();
+    const id = setInterval(run, 5 * 60_000);
+    return () => clearInterval(id);
+  }, [tracked, place]);
+
+  const locate = () => {
+    if (!("geolocation" in navigator)) {
+      setGeoError("Location isn't available in this browser.");
+      return;
+    }
+    setLocating(true);
+    setGeoError("");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const mine: Place = {
+          name: `${pos.coords.latitude.toFixed(1)}°, ${pos.coords.longitude.toFixed(1)}°`,
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+        };
+        setHere(mine);
+        setPlace(mine);
+        setLocating(false);
+      },
+      () => {
+        setGeoError("Couldn't get your location. Pick a city instead.");
+        setLocating(false);
+      },
+      { maximumAge: 600_000, timeout: 10_000 },
+    );
+  };
+
+  const tz = place?.timeZone;
+  const label = TRACKABLE.find((t) => t.id === trackedId)?.label ?? tracked?.name ?? "";
+
+  return (
+    <main className="relative min-h-svh bg-void text-ink lg:h-svh lg:overflow-hidden">
+      {/* Globe: fills the screen on desktop, the top of it on phones. */}
+      <div className="relative h-[58svh] w-full lg:absolute lg:inset-0 lg:h-full">
+        <OrbitScene
+          sats={sats}
+          tracked={tracked}
+          trackedName={label}
+          observer={place}
+          follow={follow}
+          onUserMove={() => setFollow(false)}
+        />
+      </div>
+
+      <header className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-5 sm:p-8">
+        <div className="pointer-events-auto">
+          <Link href="/" className="font-mono text-[11px] tracking-[0.2em] text-ink/60 transition-colors hover:text-gold">
+            <ScrambleText text="← STELLR" />
+          </Link>
+          <h1 className="display mt-5 text-[clamp(1.6rem,3vw,2.8rem)] text-ink">Orbit Watch</h1>
+          <p className="caps mt-2 hidden max-w-[34ch] text-[11px] text-ink/55 sm:block sm:text-[12px]">
+            Satellites and space stations where they are right now, and when they cross your sky.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setFollow((f) => !f)}
+          className={`pointer-events-auto whitespace-nowrap rounded-full border px-4 py-2 font-mono text-[10px] tracking-[0.2em] transition-colors ${
+            follow ? "border-gold text-gold" : "border-ink/30 text-ink/70 hover:border-ink/60"
+          }`}
+        >
+          {follow ? "● FOLLOWING" : "FOLLOW"} <span className="hidden sm:inline">{label.toUpperCase()}</span>
+        </button>
+      </header>
+
+      <aside className="relative z-10 px-5 pb-10 sm:px-8 lg:absolute lg:bottom-8 lg:right-8 lg:top-28 lg:w-[380px] lg:overflow-y-auto lg:p-0">
+        <div className="frame bg-void/70 backdrop-blur-md">
+          {/* What to follow */}
+          <div className="flex flex-wrap gap-2 border-b border-ink/10 p-5">
+            {(options.length ? options : TRACKABLE.slice(0, 1)).map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => {
+                  setTrackedId(o.id);
+                  setFollow(true);
+                }}
+                className={`rounded-full border px-4 py-1.5 font-mono text-[10px] tracking-[0.2em] transition-colors ${
+                  o.id === trackedId ? "border-gold bg-gold text-void" : "border-ink/25 text-ink/70 hover:border-ink/60"
+                }`}
+              >
+                {o.label.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          {/* Live state */}
+          <dl className="grid grid-cols-2 border-b border-ink/10 font-mono text-xs">
+            {[
+              ["LATITUDE", live ? latLabel(live.latitude) : "—"],
+              ["LONGITUDE", live ? lonLabel(live.longitude) : "—"],
+              ["ALTITUDE", live ? `${Math.round(live.altitudeKm)} KM` : "—"],
+              ["SPEED", live ? `${fixed(live.speedKmS)} KM/S` : "—"],
+            ].map(([k, v], i) => (
+              <div key={k} className={`p-4 ${i % 2 === 0 ? "border-r" : ""} ${i < 2 ? "border-b" : ""} border-ink/10`}>
+                <dt className="text-[10px] tracking-[0.2em] text-ink/45">{k}</dt>
+                <dd className="mt-1.5 tabular-nums tracking-[0.06em] text-gold">{v}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="border-b border-ink/10 px-4 py-3 font-mono text-[10px] tracking-[0.2em] text-ink/55">
+            {load === "loading" && "LOADING ORBITAL ELEMENTS…"}
+            {load === "error" && (
+              <>
+                ORBITAL DATA UNAVAILABLE.{" "}
+                <button type="button" onClick={fetchAll} className="text-gold underline-offset-4 hover:underline">
+                  RETRY
+                </button>
+              </>
+            )}
+            {load === "ready" && live && (live.sunlit ? "IN SUNLIGHT" : "IN EARTH'S SHADOW")}
+            {load === "ready" && ` · ${sats.length} OBJECTS ON THE GLOBE`}
+          </p>
+
+          {/* Where the visitor is */}
+          <div className="border-b border-ink/10 p-5">
+            <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">YOUR SKY</p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <select
+                aria-label="Location"
+                value={place && place === here ? MY_LOCATION : (place?.name ?? "")}
+                onChange={(e) => {
+                  if (e.target.value === MY_LOCATION && here) setPlace(here);
+                  else setPlace(CITIES.find((c) => c.name === e.target.value) ?? null);
+                }}
+                className="h-9 min-w-0 flex-1 rounded-full border border-ink/25 bg-void px-4 font-mono text-[11px] tracking-[0.12em] text-ink outline-none focus:border-ink/60"
+              >
+                {here && <option value={MY_LOCATION}>MY LOCATION ({here.name})</option>}
+                {CITIES.map((c) => (
+                  <option key={c.name} value={c.name}>
+                    {c.name.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={locate}
+                disabled={locating}
+                className="h-9 shrink-0 rounded-full border border-ink/25 px-4 font-mono text-[10px] tracking-[0.18em] text-ink/80 transition-colors hover:border-ink/60 disabled:opacity-50"
+              >
+                {locating ? "LOCATING…" : "USE MY LOCATION"}
+              </button>
+            </div>
+            {geoError && <p className="mt-2 font-mono text-[10px] text-gold">{geoError}</p>}
+            <p className="caps mt-3 text-[10px] text-ink/45">Computed in your browser. Your location never leaves this page.</p>
+          </div>
+
+          {/* Passes */}
+          <div className="p-5">
+            <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">
+              NEXT PASSES · {label.toUpperCase()} · ABOVE 10°
+            </p>
+            {load !== "ready" ? (
+              <p className="mt-4 font-mono text-xs text-ink/45">—</p>
+            ) : list.length ? (
+              <ul className="mt-3 divide-y divide-ink/10">
+                {list.slice(0, 6).map((p) => {
+                  const overhead = p.start.getTime() <= clock && p.end.getTime() > clock;
+                  return (
+                    <li key={p.start.getTime()} className="flex items-start justify-between gap-4 py-3 font-mono text-xs">
+                      <div>
+                        <p className="tracking-[0.08em] text-ink">
+                          {day(p.start, tz)} · {time(p.start, tz)}
+                        </p>
+                        <p className="mt-1 text-[10px] tracking-[0.14em] text-ink/50">
+                          {compass(p.startAzimuth)} → {compass(p.endAzimuth)} · {Math.round(p.maxElevation)}° HIGH ·{" "}
+                          {Math.max(1, Math.round((p.end.getTime() - p.start.getTime()) / 60_000))} MIN
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 text-[10px] tracking-[0.18em] ${overhead || p.visible ? "text-gold" : "text-ink/35"}`}
+                      >
+                        {overhead ? "● NOW" : p.visible ? "VISIBLE" : "NOT VISIBLE"}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="caps mt-4 text-[11px] text-ink/55">No passes above 10° in the next three days from here.</p>
+            )}
+            <p className="caps mt-4 text-[10px] leading-relaxed text-ink/40">
+              Visible means it catches sunlight while your sky is dark, so you can see it with your own eyes. Times are
+              local to the place chosen.
+            </p>
+          </div>
+        </div>
+
+        <p className="mt-4 font-mono text-[10px] tracking-[0.15em] text-ink/40">
+          ORBITAL ELEMENTS FROM{" "}
+          <a href="https://celestrak.org" target="_blank" rel="noreferrer" className="text-ink/70 hover:text-gold">
+            CELESTRAK
+          </a>{" "}
+          · POSITIONS BY SGP4, LIVE IN YOUR BROWSER
+        </p>
+      </aside>
+    </main>
+  );
+}

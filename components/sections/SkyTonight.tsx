@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useReveal } from "@/components/ui/useReveal";
 import IndexBar from "@/components/ui/IndexBar";
 import SplitWords from "@/components/ui/SplitWords";
@@ -231,12 +232,12 @@ export default function SkyTonight() {
           )}
         </div>
 
-        <a
-          href="#tools"
+        <Link
+          href="/orbit-watch"
           className="reveal-fade mt-6 inline-block font-mono text-[11px] tracking-[0.18em] text-ink/60 transition-colors hover:text-gold"
         >
-          <ScrambleText text="SATELLITE PASSES ARRIVE WITH ORBIT WATCH →" />
-        </a>
+          <ScrambleText text="SEE SATELLITE PASSES IN ORBIT WATCH →" />
+        </Link>
       </div>
     </section>
   );
