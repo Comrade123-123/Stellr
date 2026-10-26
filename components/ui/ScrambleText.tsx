@@ -48,7 +48,8 @@ export default function ScrambleText({ text, className = "" }: { text: string; c
   return (
     <>
       <span className="sr-only">{text}</span>
-      <span ref={el} aria-hidden className={`inline-block whitespace-pre ${className}`}>
+      {/* Keyed by the text: the effect writes this span's text directly, so a new label needs a fresh span. */}
+      <span key={text} ref={el} aria-hidden className={`inline-block whitespace-pre ${className}`}>
         {text}
       </span>
     </>
