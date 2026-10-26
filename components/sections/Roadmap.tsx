@@ -9,10 +9,11 @@ const PHASES: { phase: string; name: string; body: string; status: string; live?
   { phase: "01", name: "Your Sky, Tonight", body: "Moon, planets and twilight for wherever you stand.", status: "LIVE", live: true },
   { phase: "02", name: "Orbit Watch", body: "The ISS and satellites overhead, live, with passes for your sky.", status: "LIVE", live: true },
   { phase: "03", name: "Sky Events", body: "Meteor showers, eclipses and launches, timed to where you are.", status: "LIVE", live: true },
-  { phase: "04", name: "Asteroid Sentinel · Space Weather", body: "Near-Earth objects on approach, flares and aurora as they develop.", status: "NEXT" },
-  { phase: "05", name: "Cosmoscope", body: "Fly between the planets at their real positions.", status: "PLANNED" },
-  { phase: "06", name: "Exoplanet Lab", body: "Worlds around other stars, found the way astronomers find them.", status: "PLANNED" },
-  { phase: "07", name: "Anveshak", body: "A research agent for questions about the sky.", status: "EXPLORING" },
+  { phase: "04", name: "Space Weather", body: "Flares, the solar wind and aurora as they develop.", status: "LIVE", live: true },
+  { phase: "05", name: "Asteroid Sentinel", body: "Near-Earth objects on approach, plotted in 3D.", status: "NEXT" },
+  { phase: "06", name: "Cosmoscope", body: "Fly between the planets at their real positions.", status: "PLANNED" },
+  { phase: "07", name: "Exoplanet Lab", body: "Worlds around other stars, found the way astronomers find them.", status: "PLANNED" },
+  { phase: "08", name: "Anveshak", body: "A research agent for questions about the sky.", status: "EXPLORING" },
 ];
 
 /** The road ahead, laid over the Milky Way seen from outside, the Sun marked on its arm. */

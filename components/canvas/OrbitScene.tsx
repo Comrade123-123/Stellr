@@ -17,7 +17,7 @@ import {
 
 const GOLD = new THREE.Color("#c9a46a");
 
-const earthVertex = /* glsl */ `
+export const earthVertex = /* glsl */ `
   varying vec2 vUv;
   varying vec3 vNormal;
   void main() {
@@ -28,7 +28,7 @@ const earthVertex = /* glsl */ `
 `;
 
 /* Day side from the day map, night side from the city-lights map, a soft terminator between. */
-const earthFragment = /* glsl */ `
+export const earthFragment = /* glsl */ `
   uniform sampler2D uDay;
   uniform sampler2D uNight;
   uniform sampler2D uClouds;
@@ -49,7 +49,7 @@ const earthFragment = /* glsl */ `
 `;
 
 /* Thin blue limb, brightest on the sunlit side. */
-const airFragment = /* glsl */ `
+export const airFragment = /* glsl */ `
   uniform vec3 uSun;
   varying vec3 vNormal;
   varying vec3 vView;
@@ -59,7 +59,7 @@ const airFragment = /* glsl */ `
     gl_FragColor = vec4(vec3(0.35, 0.6, 1.0) * rim * lit * 1.2, rim * lit);
   }
 `;
-const airVertex = /* glsl */ `
+export const airVertex = /* glsl */ `
   varying vec3 vNormal;
   varying vec3 vView;
   void main() {
@@ -92,7 +92,7 @@ const pointFragment = /* glsl */ `
 
 const toPoint = new THREE.Vector3();
 /** True when Earth (the unit sphere) stands between the camera and `point`. */
-function behindEarth(camera: THREE.Vector3, point: THREE.Vector3) {
+export function behindEarth(camera: THREE.Vector3, point: THREE.Vector3) {
   const d = toPoint.subVectors(point, camera);
   const len = d.length();
   d.divideScalar(len);
@@ -175,7 +175,7 @@ function Earth({ observer }: { observer: Observer | null }) {
   );
 }
 
-function Stars() {
+export function Stars() {
   const geometry = useMemo(() => {
     const n = 2500;
     const pos = new Float32Array(n * 3);
@@ -362,7 +362,7 @@ function Swarm({ onStatus }: { onStatus: (s: SwarmStatus) => void }) {
   return <points geometry={geometry} material={material} frustumCulled={false} renderOrder={1} />;
 }
 
-function MakeRoomForPanel() {
+export function MakeRoomForPanel() {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const size = useThree((s) => s.size);
   useEffect(() => {

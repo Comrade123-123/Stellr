@@ -29,6 +29,7 @@ const TOOLS: { name: string; body: string; tags: string[]; href?: string }[] = [
     name: "Space Weather",
     body: "Solar flares, geomagnetic storms and aurora forecasts as they develop.",
     tags: ["SOLAR WIND", "KP INDEX", "AURORA"],
+    href: "/space-weather",
   },
 ];
 
