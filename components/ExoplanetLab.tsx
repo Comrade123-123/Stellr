@@ -18,7 +18,7 @@ import {
   type Curve,
   type Planet,
 } from "@/lib/exoplanets";
-import { planetScore, vetFeatures, type VetterModel } from "@/lib/vetter";
+import { planetScore, vetFeatures, type StarParams, type VetterModel } from "@/lib/vetter";
 
 type Load = "idle" | "loading" | "ready" | "error";
 type Method = "all" | "Transit" | "Radial Velocity" | "other";
@@ -178,6 +178,8 @@ export default function ExoplanetLab() {
   const [model, setModel] = useState<VetterModel | null>(null);
   const [modelLoad, setModelLoad] = useState<Load>("loading");
   const [tois, setTois] = useState<Toi[]>([]);
+  /** The target in the TESS Input Catalog: known for any star TESS watched, not only planet hosts. */
+  const [ticStar, setTicStar] = useState<(StarParams & { tmag: number | null }) | null>(null);
 
   // The catalogue, once.
   useEffect(() => {
@@ -230,6 +232,8 @@ export default function ExoplanetLab() {
     return catalog.filter((p) => (p.tic && tic(p.tic) === target.tic) || (target.host && p.host === target.host));
   }, [catalog, target]);
   const star = known[0] ?? null;
+  const starRadius = ticStar?.radius ?? star?.starRadius ?? null;
+  const starParams: StarParams = { radius: starRadius, teff: ticStar?.teff ?? star?.starTemp ?? null, logg: ticStar?.logg ?? null };
 
   const loadTarget = useCallback((t: Target) => {
     setTarget(t);
@@ -241,6 +245,13 @@ export default function ExoplanetLab() {
     setDetail("");
     setSectorLoad("loading");
     setTois([]);
+    setTicStar(null);
+    fetch(`/api/exoplanets/star?tic=${t.tic}`)
+      .then(async (res) => {
+        const data = (await res.json()) as { star?: (StarParams & { tmag: number | null }) | null };
+        if (res.ok && data.star) setTicStar(data.star);
+      })
+      .catch(() => {});
     fetch(`/api/exoplanets/toi?tic=${t.tic}`)
       .then(async (res) => {
         const data = (await res.json()) as { tois?: Toi[] };
@@ -334,12 +345,12 @@ export default function ExoplanetLab() {
   };
 
   const latest = signals[signals.length - 1] ?? null;
-  const judge = (s: Signal) => verdict(s, known, tois, star?.starRadius ?? null);
+  const judge = (s: Signal) => verdict(s, known, tois, starRadius);
   const latestVerdict = latest ? judge(latest) : null;
   const found = signals.filter((s) => s.result && judge(s).kind !== "none");
   const score = (s: Signal) => {
     if (!model || !s.result) return null;
-    const x = vetFeatures(s.result.period, s.result.duration, s.result.depth);
+    const x = vetFeatures(s.result.period, s.result.duration, s.result.depth, starParams);
     return x ? planetScore(model, x) : null;
   };
 
@@ -413,7 +424,7 @@ export default function ExoplanetLab() {
     return { layers, window, y: [lo, hi] as [number, number], bins: { x: bx, y: by } };
   }, [latest]);
 
-  const radiusEarth = (d: number) => (star?.starRadius ? Math.sqrt(d) * star.starRadius * EARTH_PER_SUN : null);
+  const radiusEarth = (d: number) => (starRadius ? Math.sqrt(d) * starRadius * EARTH_PER_SUN : null);
 
   const report = () => {
     if (!target || !curve) return;
@@ -443,12 +454,14 @@ export default function ExoplanetLab() {
           `- Period: ${r.period.toFixed(5)} d`,
           `- Mid-transit: BTJD ${r.t0.toFixed(4)} (BJD ${(r.t0 + BTJD).toFixed(4)})`,
           `- Duration: ${r.duration.toFixed(2)} h`,
-          `- Depth: ${depthText(r.depth)}${rad ? ` (radius ≈ ${rad.toFixed(1)} R⊕ for a star of ${star!.starRadius} R☉)` : ""}`,
+          `- Depth: ${depthText(r.depth)}${rad ? ` (radius ≈ ${rad.toFixed(1)} R⊕ for a star of ${starRadius!.toFixed(2)} R☉)` : ""}`,
           `- SNR ${r.snr.toFixed(1)}, SDE ${r.sde.toFixed(1)}, ${r.transits} transits with data`,
           `- Odd vs even depth: ${depthText(c.odd.depth)} ± ${depthText(c.odd.err)} vs ${depthText(c.even.depth)} ± ${depthText(c.even.err)}`,
           `- Secondary eclipse (phase 0.5): ${depthText(Math.max(c.secondary.depth, 0))} ± ${depthText(c.secondary.err)}`,
           `- Shape: edges ${depthText(Math.max(c.shape.edge, 0))} vs middle ${depthText(Math.max(c.shape.core, 0))} deep`,
-          ...(score(s) !== null && model ? [`- ML vetter: ${Math.round(score(s)! * 100)}% planet-like (gradient-boosted trees trained ${model.trained} on Kepler signals; Kepler AUC ${model.metrics.kepler.auc}${model.metrics.tess ? `, TESS AUC ${model.metrics.tess.auc}` : ""})`] : []),
+          ...(score(s) !== null && model
+            ? [`- ML vetter: ${Math.round(score(s)! * 100)}% planet-like (gradient-boosted trees trained ${model.trained}; AUC on unseen TESS signals ${model.metrics.tess?.auc ?? "n/a"})`]
+            : []),
         );
       }
       for (const n of v.notes) lines.push(`- ${n}`);
@@ -605,7 +618,9 @@ export default function ExoplanetLab() {
                       <p className="mt-1 font-mono text-[10px] tracking-[0.16em] text-ink/45">
                         TIC {target.tic}
                         {known.length ? ` · ${known.length} KNOWN PLANET${known.length > 1 ? "S" : ""}` : " · NO KNOWN PLANETS"}
-                        {star?.starRadius ? ` · ${star.starRadius} × THE SUN'S SIZE` : ""}
+                        {starRadius ? ` · ${starRadius.toFixed(2)} × THE SUN'S SIZE` : ""}
+                        {starParams.teff ? ` · ${Math.round(starParams.teff).toLocaleString("en")} K` : ""}
+                        {ticStar?.tmag ? ` · TESS MAGNITUDE ${ticStar.tmag.toFixed(1)}` : ""}
                         {tois.length ? ` · ${tois.length} TESS OBJECT${tois.length > 1 ? "S" : ""} OF INTEREST` : ""}
                       </p>
                     </>
@@ -830,7 +845,7 @@ export default function ExoplanetLab() {
                       <Fact
                         label="SIZE"
                         value={radiusEarth(latest.result.depth) ? `≈ ${radiusEarth(latest.result.depth)!.toFixed(1)} × EARTH` : "—"}
-                        sub={star?.starRadius ? "FROM DEPTH AND STAR SIZE" : "STAR SIZE UNKNOWN"}
+                        sub={starRadius ? "FROM DEPTH AND STAR SIZE" : "STAR SIZE UNKNOWN"}
                       />
                       <Fact label="SNR" value={latest.result.snr.toFixed(1)} sub="SIGNAL OVER NOISE" />
                       <Fact label="SDE" value={latest.result.sde.toFixed(1)} sub="PEAK ABOVE THE REST" />
@@ -867,7 +882,7 @@ export default function ExoplanetLab() {
                         `edges ${depthText(Math.max(c.shape.edge, 0))} vs middle ${depthText(Math.max(c.shape.core, 0))}`,
                       ],
                     ];
-                    const R = star?.starRadius;
+                    const R = starRadius;
                     if (R) {
                       const longest = longestTransit(latest.result!.period, R);
                       const size = Math.sqrt(latest.result!.depth) * R * EARTH_PER_SUN;
@@ -900,13 +915,27 @@ export default function ExoplanetLab() {
                         <div className="h-1.5 rounded-full bg-gold" style={{ width: `${score(latest)! * 100}%` }} />
                       </div>
                       <p className="caps mt-3 max-w-[70ch] text-[11px] leading-relaxed text-ink/55">
-                        Gradient-boosted trees trained on {model.metrics.kepler.n.toLocaleString("en")} Kepler signals already judged planet or false
-                        positive, from the signal&apos;s period, depth and duration alone. On signals it never saw it ranks a planet above a false
-                        positive {Math.round(model.metrics.kepler.auc * 100)}% of the time
-                        {model.metrics.tess ? `; on TESS signals, from a different telescope, ${Math.round(model.metrics.tess.auc * 100)}%` : ""}.
-                        {model.metrics.tess && model.metrics.tess.auc < 0.75
-                          ? " It carries over poorly from Kepler to TESS, so on this data treat it as a weak hint."
-                          : " A score to weigh with the checks above, not a verdict."}
+                        {model.version === 2 ? (
+                          <>
+                            Gradient-boosted trees trained on {model.counts.tess.toLocaleString("en")} TESS and {model.counts.kepler.toLocaleString("en")}{" "}
+                            Kepler signals already judged planet or false positive, from the signal&apos;s period, depth and duration and the star&apos;s
+                            size, temperature and gravity. On TESS stars it never saw, it ranks a real planet above a false positive{" "}
+                            {Math.round(model.metrics.tess.auc * 100)}% of the time (the earlier Kepler-only version:{" "}
+                            {Math.round(model.metrics.tess_previous.auc * 100)}%).
+                            {model.metrics.tess.auc < 0.75
+                              ? " Still a weak hint on TESS data: weigh the checks above first."
+                              : " A score to weigh with the checks above, not a verdict."}
+                          </>
+                        ) : (
+                          <>
+                            Gradient-boosted trees trained on {model.metrics.kepler.n.toLocaleString("en")} Kepler signals, from the signal&apos;s period,
+                            depth and duration alone.
+                            {model.metrics.tess ? ` On TESS signals it ranks a planet above a false positive ${Math.round(model.metrics.tess.auc * 100)}% of the time.` : ""}
+                            {model.metrics.tess && model.metrics.tess.auc < 0.75
+                              ? " It carries over poorly from Kepler to TESS, so on this data treat it as a weak hint."
+                              : " A score to weigh with the checks above, not a verdict."}
+                          </>
+                        )}
                       </p>
                       <p className="mt-1 font-mono text-[10px] tracking-[0.12em] text-ink/35">TRAINED {model.trained} · NASA EXOPLANET ARCHIVE</p>
                     </>
