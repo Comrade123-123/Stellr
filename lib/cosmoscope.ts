@@ -26,7 +26,7 @@ export const AU_KM = 149_597_870.7;
 const AU_LIGHT_S = 499.004784;
 const OBLIQUITY = (23.439291 * Math.PI) / 180;
 
-export type BodyName = "Sun" | "Mercury" | "Venus" | "Earth" | "Mars" | "Jupiter" | "Saturn" | "Uranus" | "Neptune";
+export type BodyName = "Sun" | "Mercury" | "Venus" | "Earth" | "Mars" | "Jupiter" | "Saturn" | "Uranus" | "Neptune" | "Pluto";
 
 export interface BodyInfo {
   name: BodyName;
@@ -35,7 +35,9 @@ export interface BodyInfo {
   about: string;
   /** Radius in scene units: hugely exaggerated, since true sizes would be invisible at these distances. */
   radius: number;
-  texture: string;
+  /** Surface map; a body with none is drawn in `color`. */
+  texture?: string;
+  color?: string;
   ring?: string;
   /** Equatorial diameter, km. */
   diameterKm: number;
@@ -53,7 +55,7 @@ export interface BodyInfo {
   tilt: number;
 }
 
-/** Figures from NASA's planetary fact sheets. Moon counts as of 2025. */
+/** Figures from NASA's planetary fact sheets. Moon counts as of 2025. Pluto, a dwarf planet, is included for its fame and its orbit. */
 export const BODIES: BodyInfo[] = [
   { name: "Sun", kind: "Star", about: "A middle-aged, middle-sized star, 109 Earths wide, holding 99.8% of all the mass in the Solar System. Everything on this map circles it.", radius: 1.5, texture: "/textures/2k_sun.jpg", diameterKm: 1_392_700, dayHours: 609.1, spinHours: 609.1, yearDays: 0, moons: "—", tempC: 5500, tilt: 7.25 },
   { name: "Mercury", kind: "Rocky planet", about: "The smallest planet and the closest to the Sun. With almost no air to hold heat, it swings from about 430 °C by day to −180 °C by night.", radius: 0.22, texture: "/textures/2k_mercury.jpg", diameterKm: 4879, dayHours: 4222.6, spinHours: 1407.6, yearDays: 88.0, moons: "0", tempC: 167, tilt: 0.03 },
@@ -64,6 +66,7 @@ export const BODIES: BodyInfo[] = [
   { name: "Saturn", kind: "Gas giant", about: "A gas giant less dense than water, circled by the brightest rings of any planet: ice and rock spread 280,000 km wide.", radius: 1.1, texture: "/textures/2k_saturn.jpg", ring: "/textures/2k_saturn_ring_alpha.png", diameterKm: 120_536, dayHours: 10.7, spinHours: 10.66, yearDays: 10_747, moons: "270+", tempC: -140, tilt: 26.7 },
   { name: "Uranus", kind: "Ice giant", about: "An ice giant knocked onto its side: each pole spends 42 years in sunlight, then 42 in darkness. Only Voyager 2 has visited.", radius: 0.75, texture: "/textures/2k_uranus.jpg", diameterKm: 51_118, dayHours: 17.2, spinHours: -17.24, yearDays: 30_589, moons: "28+", tempC: -195, tilt: 97.8 },
   { name: "Neptune", kind: "Ice giant", about: "The farthest planet, with the fastest winds measured anywhere in the Solar System, over 2,000 km/h. It was found by mathematics before it was seen, in 1846.", radius: 0.72, texture: "/textures/2k_neptune.jpg", diameterKm: 49_528, dayHours: 16.1, spinHours: 16.11, yearDays: 59_800, moons: "16", tempC: -200, tilt: 28.3 },
+  { name: "Pluto", kind: "Dwarf planet", about: "A dwarf planet of the Kuiper Belt, smaller than our Moon, with a heart-shaped plain of nitrogen ice. Its tilted, stretched orbit brings it closer to the Sun than Neptune for 20 years in every 248. New Horizons flew past in 2015.", radius: 0.2, color: "#c9b59a", diameterKm: 2377, dayHours: 153.3, spinHours: -153.3, yearDays: 90_560, moons: "5", tempC: -225, tilt: 122.5 },
 ];
 
 export const bodyInfo = (name: BodyName) => BODIES.find((b) => b.name === name)!;

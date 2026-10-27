@@ -292,11 +292,7 @@ export default function CosmoscopeTool() {
             <ScrambleText text="← STELLR" />
           </Link>
           <h1 className="display mt-5 text-[clamp(1.6rem,3vw,2.8rem)] text-ink">Cosmoscope</h1>
-          <p className="caps mt-2 text-[11px] text-ink/60 sm:hidden">A live map of the Solar System, at any moment.</p>
-          <p className="caps mt-2 hidden max-w-[40ch] text-[11px] leading-relaxed text-ink/60 sm:block sm:text-[12px]">
-            A live map of the Solar System. The Sun, the planets, their larger moons and four spacecraft, each exactly where it is at the
-            moment shown: now, or any date from 1900 to 2199.
-          </p>
+          <p className="caps mt-2 max-w-[34ch] text-[11px] text-ink/60 sm:text-[12px]">Every planet, moon and spacecraft, where it really is.</p>
           <p className="mt-3 hidden font-mono text-[10px] tracking-[0.18em] text-ink/40 lg:block">CLICK A NAME TO FLY THERE · DRAG TO TURN · SCROLL TO ZOOM</p>
         </div>
         <div className="pointer-events-auto flex flex-wrap gap-2 sm:max-w-[60%] sm:justify-end">
@@ -568,9 +564,13 @@ export default function CosmoscopeTool() {
                           ? "No. It stays below the horizon all night from here."
                           : "No proper night at this latitude on this date: the Sun never sets far enough."}
                   </p>
-                  {(selected === "Uranus" || selected === "Neptune") && sky.kind === "visible" && (
+                  {(selected === "Uranus" || selected === "Neptune" || selected === "Pluto") && sky.kind === "visible" && (
                     <p className="mt-1 font-mono text-[10px] tracking-[0.12em] text-ink/45">
-                      {selected === "Uranus" ? "AT THE EDGE OF NAKED-EYE SIGHT; BINOCULARS HELP." : "TOO FAINT FOR THE EYE; NEEDS A TELESCOPE."}
+                      {selected === "Uranus"
+                        ? "AT THE EDGE OF NAKED-EYE SIGHT; BINOCULARS HELP."
+                        : selected === "Pluto"
+                          ? "FAR TOO FAINT FOR THE EYE: IT TAKES A LARGE TELESCOPE AND A DARK SKY."
+                          : "TOO FAINT FOR THE EYE; NEEDS A TELESCOPE."}
                     </p>
                   )}
                   <div className="mt-4">
@@ -668,7 +668,7 @@ export default function CosmoscopeTool() {
               <p className="mt-3 text-[13px] leading-relaxed text-ink/70">
                 How far each world is from Earth at the moment shown, and how long its light takes to reach us. Choose one to fly there.
               </p>
-              <p className="mt-5 font-mono text-[10px] tracking-[0.2em] text-ink/45">THE SUN AND PLANETS</p>
+              <p className="mt-5 font-mono text-[10px] tracking-[0.2em] text-ink/45">THE SUN, THE PLANETS AND PLUTO</p>
               <ul className="mt-1 divide-y divide-ink/10">
                 {table.map(({ name, d }) => (
                   <li key={name}>

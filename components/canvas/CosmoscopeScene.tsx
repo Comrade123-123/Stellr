@@ -275,16 +275,18 @@ function Planets({
   onSelect: (id: string) => void;
   reducedMotion: boolean;
 }) {
-  const textures = useTexture([...BODIES.map((b) => b.texture), "/textures/2k_saturn_ring_alpha.png"]);
+  const mapped = BODIES.filter((b) => b.texture);
+  const textures = useTexture([...mapped.map((b) => b.texture!), "/textures/2k_saturn_ring_alpha.png"]);
   const camera = useThree((s) => s.camera);
 
   const parts = useMemo(() => {
     for (const t of textures) t.colorSpace = THREE.SRGBColorSpace;
     const ringMap = textures[textures.length - 1];
-    const materials = BODIES.map((b, i) =>
+    const map = (b: (typeof BODIES)[number]) => textures[mapped.indexOf(b)];
+    const materials = BODIES.map((b) =>
       b.name === "Sun"
-        ? new THREE.MeshBasicMaterial({ map: textures[i], color: new THREE.Color(1.6, 1.35, 1.05), toneMapped: false })
-        : new THREE.MeshLambertMaterial({ map: textures[i] }),
+        ? new THREE.MeshBasicMaterial({ map: map(b), color: new THREE.Color(1.6, 1.35, 1.05), toneMapped: false })
+        : new THREE.MeshLambertMaterial(b.texture ? { map: map(b) } : { color: b.color }),
     );
     // Ring UVs run radially so the 1-D ring texture maps inner → outer edge.
     const ring = new THREE.RingGeometry(1.25, 2.3, 160, 1);
@@ -307,6 +309,8 @@ function Planets({
       blending: THREE.AdditiveBlending,
     });
     return { materials, ring, ringMaterial, corona };
+    // `mapped` is derived from the constant BODIES.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [textures]);
 
   // Orbits barely change over a human lifetime: traced once, from today.
