@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Plot, { type Layer, type Marker } from "@/components/charts/Plot";
+import PlanetPortrait from "@/components/PlanetPortrait";
 import ScrambleText from "@/components/ui/ScrambleText";
 import {
   BTJD,
@@ -19,6 +20,7 @@ import {
   type Planet,
 } from "@/lib/exoplanets";
 import { planetScore, vetFeatures, type StarParams, type VetterModel } from "@/lib/vetter";
+import { describe, KIND_LABEL } from "@/lib/worlds";
 
 type Load = "idle" | "loading" | "ready" | "error";
 type Method = "all" | "Transit" | "Radial Velocity" | "other";
@@ -44,6 +46,33 @@ interface Toi {
   period: number | null;
   depthPpm: number | null;
   durationH: number | null;
+}
+
+/** An investigation kept in this browser's storage. */
+interface Saved {
+  id: string;
+  tic: string;
+  label: string;
+  host: string | null;
+  at: string;
+  findings: { title: string; period: number | null; depth: number | null; score: number | null }[];
+}
+const SAVED_KEY = "stellr.exoplanet-lab.investigations";
+function readSaved(): Saved[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(SAVED_KEY) ?? "[]");
+    return Array.isArray(v) ? (v as Saved[]) : [];
+  } catch {
+    return [];
+  }
+}
+function writeSaved(list: Saved[]) {
+  try {
+    localStorage.setItem(SAVED_KEY, JSON.stringify(list.slice(0, 50)));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const DISPOSITIONS: Record<string, string> = {
@@ -179,7 +208,10 @@ export default function ExoplanetLab() {
   const [modelLoad, setModelLoad] = useState<Load>("loading");
   const [tois, setTois] = useState<Toi[]>([]);
   /** The target in the TESS Input Catalog: known for any star TESS watched, not only planet hosts. */
-  const [ticStar, setTicStar] = useState<(StarParams & { tmag: number | null }) | null>(null);
+  const [ticStar, setTicStar] = useState<(StarParams & { tmag: number | null; mass: number | null }) | null>(null);
+  /** Investigations kept in this browser: what was found, not the data, which reloads from MAST. */
+  const [saved, setSaved] = useState<Saved[]>([]);
+  const [savedNote, setSavedNote] = useState("");
 
   // The catalogue, once.
   useEffect(() => {
@@ -195,7 +227,10 @@ export default function ExoplanetLab() {
         setCatDetail(e instanceof Error ? e.message : "");
         setCatLoad("error");
       });
-    // The vetter, trained in GitHub Actions on NASA's Kepler signals.
+    // Browser storage exists only after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSaved(readSaved());
+    // The vetter, trained in GitHub Actions on NASA's Kepler and TESS signals.
     fetch("/models/vetter.json")
       .then(async (res) => {
         if (!res.ok) throw new Error(String(res.status));
@@ -248,7 +283,7 @@ export default function ExoplanetLab() {
     setTicStar(null);
     fetch(`/api/exoplanets/star?tic=${t.tic}`)
       .then(async (res) => {
-        const data = (await res.json()) as { star?: (StarParams & { tmag: number | null }) | null };
+        const data = (await res.json()) as { star?: (StarParams & { tmag: number | null; mass: number | null }) | null };
         if (res.ok && data.star) setTicStar(data.star);
       })
       .catch(() => {});
@@ -425,6 +460,11 @@ export default function ExoplanetLab() {
   }, [latest]);
 
   const radiusEarth = (d: number) => (starRadius ? Math.sqrt(d) * starRadius * EARTH_PER_SUN : null);
+  /** Every confirmed planet with a size and an orbit, for the size–orbit chart. */
+  const worldLayer = useMemo<Layer>(() => {
+    const w = catalog.filter((p) => p.radius && p.period);
+    return { kind: "points", x: w.map((p) => p.period!), y: w.map((p) => p.radius!), color: DIM, size: 2 };
+  }, [catalog]);
 
   const report = () => {
     if (!target || !curve) return;
@@ -467,6 +507,17 @@ export default function ExoplanetLab() {
       for (const n of v.notes) lines.push(`- ${n}`);
       lines.push("");
     });
+    if (latest?.result && starRadius && starParams.teff && radiusEarth(latest.result.depth)) {
+      const d = describe({ radiusEarth: radiusEarth(latest.result.depth)!, period: latest.result.period, starRadius, starTeff: starParams.teff, starMass: ticStar?.mass ?? null });
+      lines.push(
+        "## What the latest signal would be like",
+        "",
+        `- Kind by size: ${KIND_LABEL[d.kind]} (${radiusEarth(latest.result.depth)!.toFixed(1)} R⊕)`,
+        `- Orbit: ${d.au.toFixed(3)} AU; starlight ${d.insolation.toFixed(2)} × Earth's; equilibrium temperature ${Math.round(d.teq)} K (albedo 0.3)`,
+        `- Habitable zone (Kopparapu et al. 2014, conservative): ${d.zone.innerAu.toFixed(2)}–${d.zone.outerAu.toFixed(2)} AU; ${d.inZone ? "inside" : "outside"}`,
+        "",
+      );
+    }
     lines.push("## Caveats", "", "Box Least Squares finds periodic dips; it cannot tell a planet from a blended or eclipsing star on its own. Nothing here is a confirmed planet unless it is already in the NASA Exoplanet Archive.", "");
     const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
     const a = document.createElement("a");
@@ -592,6 +643,11 @@ export default function ExoplanetLab() {
                   <Fact label="DISTANCE" value={fmtNum(picked.distance ? picked.distance * 3.2616 : null, 1, " LIGHT-YEARS")} />
                   <Fact label="ITS STAR" value={picked.starTemp ? `${Math.round(picked.starTemp).toLocaleString("en")} K` : "—"} sub={picked.starRadius ? `${picked.starRadius} × THE SUN'S SIZE` : undefined} />
                 </dl>
+                {picked.radius && picked.period && picked.starRadius && picked.starTemp && (
+                  <div className="mt-5 border-t border-ink/10 pt-5">
+                    <PlanetPortrait compact name={picked.name} radiusEarth={picked.radius} period={picked.period} starRadius={picked.starRadius} starTeff={picked.starTemp} seed={Math.round(picked.period * 1000)} />
+                  </div>
+                )}
                 {picked.tic ? (
                   <button
                     type="button"
@@ -603,6 +659,38 @@ export default function ExoplanetLab() {
                 ) : (
                   <p className="caps mt-4 text-[11px] text-ink/50">No TESS catalogue number for this star, so no light curve to analyse here.</p>
                 )}
+              </section>
+            )}
+
+            {saved.length > 0 && (
+              <section className="frame bg-void/70 p-5">
+                <p className="font-mono text-[10px] tracking-[0.22em] text-ink/50">YOUR INVESTIGATIONS · KEPT IN THIS BROWSER</p>
+                <ul className="mt-3 divide-y divide-ink/10">
+                  {saved.map((v) => (
+                    <li key={v.id} className="flex items-start justify-between gap-3 py-2.5 font-mono">
+                      <button type="button" onClick={() => loadTarget({ tic: v.tic, label: v.label, host: v.host })} className="min-w-0 text-left text-ink/85 transition-colors hover:text-gold">
+                        <span className="block truncate text-[12px] tracking-[0.04em]">{v.label}</span>
+                        <span className="mt-0.5 block text-[10px] tracking-[0.1em] text-ink/45">
+                          {v.at} · {v.findings.length} SEARCH{v.findings.length === 1 ? "" : "ES"}
+                          {v.findings[0] ? ` · ${v.findings[0].title}` : ""}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Forget ${v.label}`}
+                        onClick={() => {
+                          const next = saved.filter((x) => x.id !== v.id);
+                          setSaved(next);
+                          writeSaved(next);
+                        }}
+                        className="shrink-0 text-[12px] text-ink/40 hover:text-gold"
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 font-mono text-[10px] tracking-[0.12em] text-ink/35">OPEN ONE TO RELOAD ITS STAR AND SEARCH AGAIN.</p>
               </section>
             )}
           </aside>
@@ -962,12 +1050,93 @@ export default function ExoplanetLab() {
                   >
                     DOWNLOAD REPORT (.MD)
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!target) return;
+                      const entry: Saved = {
+                        id: `${target.tic}-${Date.now()}`,
+                        tic: target.tic,
+                        label: target.label,
+                        host: target.host,
+                        at: new Date().toISOString().slice(0, 10),
+                        findings: signals.map((x) => ({ title: judge(x).title, period: x.result?.period ?? null, depth: x.result?.depth ?? null, score: score(x) })),
+                      };
+                      const next = [entry, ...saved.filter((x) => x.tic !== target.tic)];
+                      setSaved(next);
+                      setSavedNote(writeSaved(next) ? "SAVED IN THIS BROWSER." : "THIS BROWSER WON'T LET THE PAGE SAVE.");
+                    }}
+                    className="rounded-full border border-ink/30 px-5 py-2.5 font-mono text-[10px] tracking-[0.16em] text-ink/85 transition-colors hover:border-ink/70"
+                  >
+                    SAVE INVESTIGATION
+                  </button>
+                  {savedNote && <span className="self-center font-mono text-[10px] tracking-[0.14em] text-ink/50">{savedNote}</span>}
                 </div>
               </Section>
             )}
 
+            {latest?.result && latestVerdict && latestVerdict.kind !== "none" && (
+              <Section step="06" title="WHAT IT WOULD BE LIKE">
+                {starRadius && starParams.teff ? (
+                  <PlanetPortrait
+                    name={target?.label ?? "this planet"}
+                    radiusEarth={radiusEarth(latest.result.depth)!}
+                    period={latest.result.period}
+                    starRadius={starRadius}
+                    starTeff={starParams.teff}
+                    starMass={ticStar?.mass ?? null}
+                    seed={Math.round(latest.result.period * 1000)}
+                  />
+                ) : (
+                  <p className="caps text-[12px] text-ink/60">The star&apos;s size or temperature isn&apos;t known, so the planet&apos;s size and warmth can&apos;t be worked out.</p>
+                )}
+              </Section>
+            )}
+
+            {latest?.result && latestVerdict && latestVerdict.kind !== "none" && radiusEarth(latest.result.depth) && (
+              <Section step="07" title="AMONG KNOWN WORLDS">
+                <div className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-[10px] tracking-[0.14em] text-ink/55">
+                  <span>
+                    <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-ink/40 align-middle" />
+                    CONFIRMED PLANETS
+                  </span>
+                  {known.length > 0 && (
+                    <span>
+                      <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-ink align-middle" />
+                      THIS STAR&apos;S KNOWN PLANETS
+                    </span>
+                  )}
+                  <span>
+                    <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full bg-gold align-middle" />
+                    THIS SIGNAL
+                  </span>
+                </div>
+                <Plot
+                  layers={[
+                    worldLayer,
+                    { kind: "points", x: known.filter((k) => k.radius && k.period).map((k) => k.period!), y: known.filter((k) => k.radius && k.period).map((k) => k.radius!), color: INK, size: 6 },
+                    { kind: "points", x: [latest.result.period], y: [radiusEarth(latest.result.depth)!], color: GOLD, size: 10 },
+                  ]}
+                  height={260}
+                  xLog
+                  yLog
+                  xDomain={[0.2, 3000]}
+                  yDomain={[0.3, 30]}
+                  xLabel="ORBIT (DAYS)"
+                  yLabel="SIZE (× EARTH)"
+                  formatX={(v) => (v < 1 ? v.toFixed(1) : String(v))}
+                  formatY={(v) => (v < 1 ? v.toFixed(1) : String(v))}
+                  ariaLabel={`This signal, ${radiusEarth(latest.result.depth)!.toFixed(1)} times Earth's size on a ${latest.result.period.toFixed(2)}-day orbit, among ${worldLayer.x.length} confirmed planets`}
+                />
+                <p className="caps mt-3 text-[11px] leading-relaxed text-ink/55">
+                  Each dot a confirmed planet with a measured size. The empty band near 1.5–2 × Earth is the &ldquo;radius valley&rdquo;, and few
+                  planets sit at small sizes on short orbits (the &ldquo;hot Neptune desert&rdquo;).
+                </p>
+              </Section>
+            )}
+
             {signals.length > 1 && (
-              <Section step="06" title="THIS INVESTIGATION">
+              <Section step="08" title="THIS INVESTIGATION">
                 <ol className="space-y-2 font-mono text-[11px] tracking-[0.08em]">
                   {signals.map((s, i) => (
                     <li key={i} className="flex flex-wrap justify-between gap-2 border-b border-ink/10 pb-2">

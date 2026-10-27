@@ -72,6 +72,7 @@ export default function Plot({
   xDomain,
   yDomain,
   xLog = false,
+  yLog = false,
   markers = [],
   formatX = (v) => String(v),
   formatY = (v) => String(v),
@@ -85,6 +86,7 @@ export default function Plot({
   xDomain?: [number, number];
   yDomain?: [number, number];
   xLog?: boolean;
+  yLog?: boolean;
   markers?: Marker[];
   formatX?: (v: number) => string;
   formatY?: (v: number) => string;
@@ -112,7 +114,9 @@ export default function Plot({
   const lx = (v: number) => (xLog ? Math.log10(Math.max(v, 1e-9)) : v);
   const [x0, x1] = [lx(xLog ? Math.max(xr[0], 1e-3) : xr[0]), lx(xr[1])];
   const sx = (v: number) => PAD.left + ((lx(v) - x0) / (x1 - x0 || 1)) * innerW;
-  const sy = (v: number) => PAD.top + (1 - (v - yr[0]) / (yr[1] - yr[0] || 1)) * innerH;
+  const ly = (v: number) => (yLog ? Math.log10(Math.max(v, 1e-9)) : v);
+  const [y0, y1] = [ly(yr[0]), ly(yr[1])];
+  const sy = (v: number) => PAD.top + (1 - (ly(v) - y0) / (y1 - y0 || 1)) * innerH;
   const invX = (px: number) => {
     const v = x0 + ((px - PAD.left) / innerW) * (x1 - x0);
     return xLog ? Math.pow(10, v) : v;
@@ -137,7 +141,7 @@ export default function Plot({
     g.fillStyle = `${INK}0.45)`;
     g.textAlign = "right";
     g.textBaseline = "middle";
-    for (const v of ticks(yr[0], yr[1], 4)) {
+    for (const v of yLog ? logTicks(yr[0], yr[1]) : ticks(yr[0], yr[1], 4)) {
       const y = Math.round(sy(v)) + 0.5;
       g.beginPath();
       g.moveTo(PAD.left, y);
@@ -221,7 +225,7 @@ export default function Plot({
     for (const m of markers) if (m.label) g.fillText(m.label, Math.min(sx(m.x) + 4, width - PAD.right - g.measureText(m.label).width), PAD.top + 2);
     // Recomputing on every layer change is the point; the scale helpers are derived from these.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layers, markers, width, height, xr[0], xr[1], yr[0], yr[1], xLog, xLabel, yLabel]);
+  }, [layers, markers, width, height, xr[0], xr[1], yr[0], yr[1], xLog, yLog, xLabel, yLabel]);
 
   return (
     <div ref={wrap} className="relative w-full select-none" style={{ height }}>
