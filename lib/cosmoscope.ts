@@ -3,10 +3,13 @@ import {
   Elongation,
   Equator,
   GeoVector,
+  GeoMoon,
   HelioVector,
   Horizon,
   Illumination,
+  JupiterMoons,
   Observer,
+  RotationAxis,
   SearchAltitude,
   SearchRelativeLongitude,
 } from "astronomy-engine";
@@ -50,7 +53,7 @@ export interface BodyInfo {
 
 /** Figures from NASA's planetary fact sheets. Moon counts as of 2025. */
 export const BODIES: BodyInfo[] = [
-  { name: "Sun", kind: "Star", radius: 2.2, texture: "/textures/2k_sun.jpg", diameterKm: 1_392_700, dayHours: 609.1, spinHours: 609.1, yearDays: 0, moons: "—", tempC: 5500, tilt: 7.25 },
+  { name: "Sun", kind: "Star", radius: 1.5, texture: "/textures/2k_sun.jpg", diameterKm: 1_392_700, dayHours: 609.1, spinHours: 609.1, yearDays: 0, moons: "—", tempC: 5500, tilt: 7.25 },
   { name: "Mercury", kind: "Rocky planet", radius: 0.22, texture: "/textures/2k_mercury.jpg", diameterKm: 4879, dayHours: 4222.6, spinHours: 1407.6, yearDays: 88.0, moons: "0", tempC: 167, tilt: 0.03 },
   { name: "Venus", kind: "Rocky planet", radius: 0.4, texture: "/textures/2k_venus_atmosphere.jpg", diameterKm: 12_104, dayHours: 2802.0, spinHours: -5832.5, yearDays: 224.7, moons: "0", tempC: 464, tilt: 177.4 },
   { name: "Earth", kind: "Rocky planet · home", radius: 0.42, texture: "/textures/2k_earth_daymap.jpg", diameterKm: 12_756, dayHours: 24.0, spinHours: 23.93, yearDays: 365.26, moons: "1", tempC: 15, tilt: 23.4 },
@@ -68,33 +71,174 @@ export const EARTH_UNITS = 12;
 /** Compressed distance: AU^0.55 keeps Mercury clear of the Sun and Neptune on screen. */
 export const compress = (au: number) => EARTH_UNITS * Math.pow(au, 0.55);
 
-/** Heliocentric ecliptic J2000 position (AU): astronomy-engine's equatorial vector, turned by the obliquity. */
+/**
+ * Scene distance for `au` from the Sun. `mix` runs from 0 (compressed, the default view) to
+ * 1 (true scale: distances proportional), so the view can glide between the two.
+ */
+export const sceneDistance = (au: number, mix = 0) => compress(au) * (1 - mix) + EARTH_UNITS * au * mix;
+
+/** A body's true radius in scene units at true scale. */
+export const trueRadius = (diameterKm: number) => (EARTH_UNITS * diameterKm) / 2 / AU_KM;
+
+/** Drawn radius between the enlarged one (mix 0) and the true one (mix 1), blended on a log scale. */
+export const blendRadius = (shown: number, real: number, mix: number) => Math.exp(Math.log(shown) * (1 - mix) + Math.log(real) * mix);
+
+/** Equatorial J2000 → ecliptic J2000, turned by the obliquity. */
+const ecliptic = (x: number, y: number, z: number): [number, number, number] => [
+  x,
+  Math.cos(OBLIQUITY) * y + Math.sin(OBLIQUITY) * z,
+  -Math.sin(OBLIQUITY) * y + Math.cos(OBLIQUITY) * z,
+];
+
+/** Heliocentric ecliptic J2000 position (AU). */
 export function helio(name: BodyName, date: Date): [number, number, number] {
   if (name === "Sun") return [0, 0, 0];
   const v = HelioVector(Body[name], date);
-  return [v.x, Math.cos(OBLIQUITY) * v.y + Math.sin(OBLIQUITY) * v.z, -Math.sin(OBLIQUITY) * v.y + Math.cos(OBLIQUITY) * v.z];
+  return ecliptic(v.x, v.y, v.z);
 }
 
 /**
- * Scene position for an ecliptic vector: distance from the Sun compressed, direction kept
- * (so inclinations stay true), ecliptic north up: (x, z, −y).
+ * Scene position for a heliocentric ecliptic vector (AU): distance from the Sun mapped by
+ * `sceneDistance`, direction kept (so inclinations stay true), ecliptic north up: (x, z, −y).
  */
-export function toScene(v: [number, number, number], out: [number, number, number] = [0, 0, 0]) {
+export function toScene(v: ArrayLike<number>, out: [number, number, number] = [0, 0, 0], mix = 0) {
   const r = Math.hypot(v[0], v[1], v[2]);
-  const k = r > 0 ? compress(r) / r : 0;
+  const k = r > 0 ? sceneDistance(r, mix) / r : 0;
   out[0] = v[0] * k;
   out[1] = v[2] * k;
   out[2] = -v[1] * k;
   return out;
 }
 
-/** One full lap of a planet's real orbit, starting at `date`, in scene coordinates. */
+/** Turns an ecliptic vector into scene axes: (x, z, −y), ecliptic north up. */
+const sceneAxes = (v: [number, number, number]): [number, number, number] => [v[0], v[2], -v[1]];
+const cross = (a: number[], b: number[]): [number, number, number] => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const unit = (v: [number, number, number]): [number, number, number] => {
+  const l = Math.hypot(...v) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
+};
+
+/**
+ * A body's real orientation, in scene axes, from the IAU rotation model in astronomy-engine:
+ * its north pole, and its prime meridian `spin` degrees east of where its equator crosses
+ * Earth's (the node). `spin` defaults to the true angle for the moment; pass another to turn it
+ * for show. Returns the spin used, so callers can carry on from it.
+ */
+export function bodyFrame(name: BodyName, date: Date, spin?: number) {
+  const axis = RotationAxis(Body[name], date);
+  const north = unit(sceneAxes(ecliptic(axis.north.x, axis.north.y, axis.north.z)));
+  const ra = axis.ra * 15 * (Math.PI / 180);
+  const node = unit(sceneAxes(ecliptic(-Math.sin(ra), Math.cos(ra), 0)));
+  const ninety = cross(north, node);
+  const w = ((spin ?? axis.spin) * Math.PI) / 180;
+  const prime = unit([node[0] * Math.cos(w) + ninety[0] * Math.sin(w), node[1] * Math.cos(w) + ninety[1] * Math.sin(w), node[2] * Math.cos(w) + ninety[2] * Math.sin(w)]);
+  const east = cross(north, prime);
+  return { north, prime, east, spin: spin ?? axis.spin };
+}
+
+/** One full lap of a planet's real orbit, starting at `date`, as heliocentric ecliptic vectors (AU). */
 export function orbitPoints(name: BodyName, date: Date, points = 360): [number, number, number][] {
   const days = bodyInfo(name).yearDays;
   const out: [number, number, number][] = [];
-  for (let k = 0; k <= points; k++) out.push(toScene(helio(name, new Date(date.getTime() + (k / points) * days * 86_400_000))));
+  for (let k = 0; k <= points; k++) out.push(helio(name, new Date(date.getTime() + (k / points) * days * 86_400_000)));
   return out;
 }
+
+export type MoonName = "Moon" | "Io" | "Europa" | "Ganymede" | "Callisto" | "Titan";
+
+export interface MoonInfo {
+  name: MoonName;
+  parent: BodyName;
+  /** Drawn radius, scene units. */
+  radius: number;
+  color: string;
+  texture?: string;
+  diameterKm: number;
+  /** Mean distance from its planet, km. */
+  distanceKm: number;
+  /** Orbital period, days. */
+  periodDays: number;
+  note: string;
+}
+
+export const MOONS: MoonInfo[] = [
+  { name: "Moon", parent: "Earth", radius: 0.12, color: "#bdbdbd", texture: "/textures/1k_moon.jpg", diameterKm: 3475, distanceKm: 384_400, periodDays: 27.32, note: "Always shows Earth the same face." },
+  { name: "Io", parent: "Jupiter", radius: 0.13, color: "#e8d27a", diameterKm: 3643, distanceKm: 421_700, periodDays: 1.769, note: "The most volcanic world known." },
+  { name: "Europa", parent: "Jupiter", radius: 0.12, color: "#d9cbb3", diameterKm: 3122, distanceKm: 671_034, periodDays: 3.551, note: "An ocean of liquid water under its ice." },
+  { name: "Ganymede", parent: "Jupiter", radius: 0.19, color: "#9c9284", diameterKm: 5268, distanceKm: 1_070_412, periodDays: 7.155, note: "The largest moon in the Solar System, bigger than Mercury." },
+  { name: "Callisto", parent: "Jupiter", radius: 0.17, color: "#6f6659", diameterKm: 4821, distanceKm: 1_882_709, periodDays: 16.689, note: "One of the most heavily cratered surfaces known." },
+  { name: "Titan", parent: "Saturn", radius: 0.18, color: "#d39a4a", diameterKm: 5150, distanceKm: 1_221_870, periodDays: 15.945, note: "A thick orange atmosphere, with lakes of liquid methane." },
+];
+
+export const moonInfo = (name: MoonName) => MOONS.find((m) => m.name === name)!;
+
+/**
+ * A moon's position relative to its planet (ecliptic, AU), from astronomy-engine for the Moon
+ * and Jupiter's four; Titan comes from JPL Horizons (`titan`), as astronomy-engine lacks it.
+ */
+export function moonOffset(name: MoonName, date: Date, titan: Track | null): [number, number, number] | null {
+  if (name === "Moon") {
+    const v = GeoMoon(date);
+    return ecliptic(v.x, v.y, v.z);
+  }
+  if (name === "Titan") return titan ? trackAt(titan, date) : null;
+  const m = JupiterMoons(date)[name.toLowerCase() as "io" | "europa" | "ganymede" | "callisto"];
+  return ecliptic(m.x, m.y, m.z);
+}
+
+/**
+ * How far from its planet a moon is drawn: proportional to the planet's drawn size, with the
+ * real distance (in planet radii) compressed, so a moon never lands inside its planet.
+ */
+export function moonDistance(moon: MoonInfo) {
+  const parent = bodyInfo(moon.parent);
+  const ratio = moon.distanceKm / (parent.diameterKm / 2);
+  return parent.radius * 0.5 * Math.pow(ratio, 0.6);
+}
+
+export interface CraftInfo {
+  /** JPL Horizons ID. */
+  id: string;
+  name: string;
+  launched: string;
+  note: string;
+}
+
+export const CRAFT: CraftInfo[] = [
+  { id: "-31", name: "Voyager 1", launched: "1977-09-05", note: "The farthest object humans have built. In interstellar space since 2012, still sending data." },
+  { id: "-32", name: "Voyager 2", launched: "1977-08-20", note: "The only spacecraft to visit Uranus and Neptune. In interstellar space since 2018." },
+  { id: "-98", name: "New Horizons", launched: "2006-01-19", note: "Flew past Pluto in 2015 and Arrokoth, the most distant world ever visited, in 2019." },
+  { id: "-96", name: "Parker Solar Probe", launched: "2018-08-12", note: "The fastest and closest to the Sun of anything ever built: 6.1 million km from its surface in December 2024." },
+];
+
+/** Positions from JPL Horizons: Julian dates and ecliptic vectors (AU), 4 numbers per sample, in time order. */
+export type Track = Float64Array;
+
+const jd = (date: Date) => date.getTime() / 86_400_000 + 2440587.5;
+
+/** Linear interpolation along a track; null outside it. */
+export function trackAt(track: Track, date: Date): [number, number, number] | null {
+  const n = track.length / 4;
+  const t = jd(date);
+  if (n < 2 || t < track[0] || t > track[(n - 1) * 4]) return null;
+  let lo = 0;
+  let hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (track[mid * 4] <= t) lo = mid;
+    else hi = mid;
+  }
+  const a = lo * 4;
+  const b = hi * 4;
+  const f = (t - track[a]) / (track[b] - track[a] || 1);
+  return [track[a + 1] + (track[b + 1] - track[a + 1]) * f, track[a + 2] + (track[b + 2] - track[a + 2]) * f, track[a + 3] + (track[b + 3] - track[a + 3]) * f];
+}
+
+/** First and last moments a track covers. */
+export const trackSpan = (track: Track): [Date, Date] => [
+  new Date((track[0] - 2440587.5) * 86_400_000),
+  new Date((track[track.length - 4] - 2440587.5) * 86_400_000),
+];
 
 export interface Distances {
   /** From Earth, AU (null for Earth itself). */
@@ -165,4 +309,35 @@ export function night(name: BodyName, place: Place, date: Date): Night {
 /** Next opposition (the planet opposite the Sun, closest and brightest) after `date`, for an outer planet. */
 export function nextOpposition(name: "Mars" | "Jupiter" | "Saturn", date: Date): Date | null {
   return SearchRelativeLongitude(Body[name], 0, date)?.date ?? null;
+}
+
+/**
+ * Where the Great Red Spot sits on the Jupiter texture (u, v from the top-left, found from its
+ * colour), as a direction in the planet's own axes (three.js sphere mapping: x the prime
+ * meridian, y north). Its longitude on the texture is not the storm's measured one.
+ */
+export const STORM_LOCAL: [number, number, number] = (() => {
+  const phi = 0.366 * Math.PI * 2;
+  const theta = 0.611 * Math.PI;
+  return [-Math.cos(phi) * Math.sin(theta), Math.cos(theta), Math.sin(phi) * Math.sin(theta)];
+})();
+
+/**
+ * The first moment from `date` (within one Jupiter day) when the storm, as placed here, is
+ * well into daylight: its sunlit side facing the Sun.
+ */
+export function stormInDaylight(date: Date): Date {
+  let best = { at: date, light: -2 };
+  for (let k = 0; k <= 120; k++) {
+    const at = new Date(date.getTime() + k * 5 * 60_000);
+    const f = bodyFrame("Jupiter", at);
+    const [x, y, z] = STORM_LOCAL;
+    const spot = [0, 1, 2].map((i) => f.prime[i] * x + f.north[i] * y - f.east[i] * z);
+    const h = sceneAxes(helio("Jupiter", at));
+    const r = Math.hypot(...h);
+    const light = -(spot[0] * h[0] + spot[1] * h[1] + spot[2] * h[2]) / r;
+    if (light > 0.6) return at;
+    if (light > best.light) best = { at, light };
+  }
+  return best.at;
 }

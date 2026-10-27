@@ -56,6 +56,10 @@ function PassFacts({ a }: { a: Approach }) {
   );
 }
 
+/** Opens Cosmoscope on this asteroid, at its close approach when there is one. */
+const cosmoscopeLink = (des: string, at: string | null) =>
+  `/cosmoscope?asteroid=${encodeURIComponent(des)}${at ? `&at=${encodeURIComponent(at)}` : ""}`;
+
 const sentryNote = (s: NonNullable<Approach["sentry"]>) =>
   `On NASA's Sentry watch list: a ${(s.ip * 100).toPrecision(2)}% chance of impact over ${s.range}, Torino scale ${s.torino}.`;
 
@@ -314,9 +318,14 @@ export default function AsteroidSentinel() {
                       ? "Its next pass is shown in the flyby view; JPL's figures above."
                       : `Its next close pass is ${((nextMs! - found.since) / (365.25 * DAY_MS)).toFixed(1)} years away, too far ahead to draw the flyby well; JPL's figures above. The orbit view shows where it is now.`}
                 </p>
-                <button type="button" onClick={() => setFound(null)} className="mt-4 font-mono text-[10px] tracking-[0.2em] text-gold hover:underline">
-                  ← BACK TO THE CLOSE PASSES
-                </button>
+                <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 font-mono text-[10px] tracking-[0.2em]">
+                  <button type="button" onClick={() => setFound(null)} className="text-gold hover:underline">
+                    ← BACK TO THE CLOSE PASSES
+                  </button>
+                  <Link href={cosmoscopeLink(found.el.des, found.next && flybyOk ? found.next.at : null)} className="text-ink/70 hover:text-gold">
+                    SEE IT IN COSMOSCOPE →
+                  </Link>
+                </div>
               </>
             ) : current ? (
               <>
@@ -338,6 +347,9 @@ export default function AsteroidSentinel() {
                       ? "It passed safely."
                       : "A safe pass: it will miss Earth by the distance above."}
                 </p>
+                <Link href={cosmoscopeLink(current.des, current.at)} className="mt-4 inline-block font-mono text-[10px] tracking-[0.2em] text-ink/70 hover:text-gold">
+                  SEE IT AMONG THE PLANETS IN COSMOSCOPE →
+                </Link>
               </>
             ) : (
               <p className="font-mono text-[11px] tracking-[0.18em] text-ink/55">
