@@ -89,7 +89,7 @@ export default function Tools() {
         </ul>
 
         <p className="reveal-fade mt-8 font-mono text-[11px] tracking-[0.18em] text-ink/45">
-          COMING NEXT — EXOPLANET LAB · ANVESHAK RESEARCH AGENT
+          COMING NEXT — ANVESHAK RESEARCH AGENT
         </p>
       </div>
     </section>

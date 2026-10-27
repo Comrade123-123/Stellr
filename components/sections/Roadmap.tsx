@@ -1,19 +1,20 @@
 "use client";
 
 import { useRef } from "react";
+import Link from "next/link";
 import { useReveal } from "@/components/ui/useReveal";
 import IndexBar from "@/components/ui/IndexBar";
 import SplitWords from "@/components/ui/SplitWords";
 
-const PHASES: { phase: string; name: string; body: string; status: string; live?: boolean }[] = [
+const PHASES: { phase: string; name: string; body: string; status: string; live?: boolean; href?: string }[] = [
   { phase: "01", name: "Your Sky, Tonight", body: "Moon, planets and twilight for wherever you stand.", status: "LIVE", live: true },
-  { phase: "02", name: "Orbit Watch", body: "The ISS and satellites overhead, live, with passes for your sky.", status: "LIVE", live: true },
-  { phase: "03", name: "Sky Events", body: "Meteor showers, eclipses and launches, timed to where you are.", status: "LIVE", live: true },
-  { phase: "04", name: "Space Weather", body: "Flares, the solar wind and aurora as they develop.", status: "LIVE", live: true },
-  { phase: "05", name: "Asteroid Sentinel", body: "Near-Earth objects on approach, plotted in 3D.", status: "LIVE", live: true },
-  { phase: "06", name: "Cosmoscope", body: "Fly between the planets at their real positions.", status: "LIVE", live: true },
-  { phase: "07", name: "Exoplanet Lab", body: "Worlds around other stars, found the way astronomers find them.", status: "NEXT" },
-  { phase: "08", name: "Anveshak", body: "A research agent for questions about the sky.", status: "EXPLORING" },
+  { phase: "02", name: "Orbit Watch", body: "The ISS and satellites overhead, live, with passes for your sky.", status: "LIVE", live: true, href: "/orbit-watch" },
+  { phase: "03", name: "Sky Events", body: "Meteor showers, eclipses and launches, timed to where you are.", status: "LIVE", live: true, href: "/sky-events" },
+  { phase: "04", name: "Space Weather", body: "Flares, the solar wind and aurora as they develop.", status: "LIVE", live: true, href: "/space-weather" },
+  { phase: "05", name: "Asteroid Sentinel", body: "Near-Earth objects on approach, plotted in 3D.", status: "LIVE", live: true, href: "/asteroid-sentinel" },
+  { phase: "06", name: "Cosmoscope", body: "Explore the universe: fly between the planets, moons and spacecraft at their real positions.", status: "LIVE", live: true, href: "/cosmoscope" },
+  { phase: "07", name: "Exoplanet Lab", body: "Research other worlds: search real TESS starlight for planets and weigh the evidence.", status: "LIVE", live: true, href: "/exoplanet-lab" },
+  { phase: "08", name: "Anveshak", body: "Investigate the unknown: a research agent that runs and records investigations on its own.", status: "NEXT" },
 ];
 
 /** The road ahead, laid over the Milky Way seen from outside, the Sun marked on its arm. */
@@ -44,7 +45,15 @@ export default function Roadmap() {
             <li key={p.phase} className="grid grid-cols-[auto_1fr_auto] items-baseline gap-x-5 border-b border-ink/10 p-5 last:border-b-0">
               <span className="font-mono text-xs tracking-[0.15em] text-gold">[{p.phase}]</span>
               <div>
-                <h3 className="display text-base text-ink sm:text-lg">{p.name}</h3>
+                <h3 className="display text-base text-ink sm:text-lg">
+                  {p.href ? (
+                    <Link href={p.href} className="transition-colors hover:text-gold">
+                      {p.name} →
+                    </Link>
+                  ) : (
+                    p.name
+                  )}
+                </h3>
                 <p className="mt-2 text-[14px] leading-relaxed text-ink/60">{p.body}</p>
               </div>
               <span className={`font-mono text-[10px] tracking-[0.18em] ${p.live ? "text-gold" : "text-ink/45"}`}>
