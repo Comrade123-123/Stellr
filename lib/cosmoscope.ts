@@ -31,6 +31,8 @@ export type BodyName = "Sun" | "Mercury" | "Venus" | "Earth" | "Mars" | "Jupiter
 export interface BodyInfo {
   name: BodyName;
   kind: string;
+  /** A sentence or two on what makes it itself. */
+  about: string;
   /** Radius in scene units: hugely exaggerated, since true sizes would be invisible at these distances. */
   radius: number;
   texture: string;
@@ -53,15 +55,15 @@ export interface BodyInfo {
 
 /** Figures from NASA's planetary fact sheets. Moon counts as of 2025. */
 export const BODIES: BodyInfo[] = [
-  { name: "Sun", kind: "Star", radius: 1.5, texture: "/textures/2k_sun.jpg", diameterKm: 1_392_700, dayHours: 609.1, spinHours: 609.1, yearDays: 0, moons: "—", tempC: 5500, tilt: 7.25 },
-  { name: "Mercury", kind: "Rocky planet", radius: 0.22, texture: "/textures/2k_mercury.jpg", diameterKm: 4879, dayHours: 4222.6, spinHours: 1407.6, yearDays: 88.0, moons: "0", tempC: 167, tilt: 0.03 },
-  { name: "Venus", kind: "Rocky planet", radius: 0.4, texture: "/textures/2k_venus_atmosphere.jpg", diameterKm: 12_104, dayHours: 2802.0, spinHours: -5832.5, yearDays: 224.7, moons: "0", tempC: 464, tilt: 177.4 },
-  { name: "Earth", kind: "Rocky planet · home", radius: 0.42, texture: "/textures/2k_earth_daymap.jpg", diameterKm: 12_756, dayHours: 24.0, spinHours: 23.93, yearDays: 365.26, moons: "1", tempC: 15, tilt: 23.4 },
-  { name: "Mars", kind: "Rocky planet", radius: 0.3, texture: "/textures/2k_mars.jpg", diameterKm: 6792, dayHours: 24.7, spinHours: 24.62, yearDays: 687.0, moons: "2", tempC: -65, tilt: 25.2 },
-  { name: "Jupiter", kind: "Gas giant", radius: 1.3, texture: "/textures/2k_jupiter.jpg", diameterKm: 142_984, dayHours: 9.9, spinHours: 9.93, yearDays: 4331, moons: "95+", tempC: -110, tilt: 3.1 },
-  { name: "Saturn", kind: "Gas giant", radius: 1.1, texture: "/textures/2k_saturn.jpg", ring: "/textures/2k_saturn_ring_alpha.png", diameterKm: 120_536, dayHours: 10.7, spinHours: 10.66, yearDays: 10_747, moons: "270+", tempC: -140, tilt: 26.7 },
-  { name: "Uranus", kind: "Ice giant", radius: 0.75, texture: "/textures/2k_uranus.jpg", diameterKm: 51_118, dayHours: 17.2, spinHours: -17.24, yearDays: 30_589, moons: "28+", tempC: -195, tilt: 97.8 },
-  { name: "Neptune", kind: "Ice giant", radius: 0.72, texture: "/textures/2k_neptune.jpg", diameterKm: 49_528, dayHours: 16.1, spinHours: 16.11, yearDays: 59_800, moons: "16", tempC: -200, tilt: 28.3 },
+  { name: "Sun", kind: "Star", about: "A middle-aged, middle-sized star, 109 Earths wide, holding 99.8% of all the mass in the Solar System. Everything on this map circles it.", radius: 1.5, texture: "/textures/2k_sun.jpg", diameterKm: 1_392_700, dayHours: 609.1, spinHours: 609.1, yearDays: 0, moons: "—", tempC: 5500, tilt: 7.25 },
+  { name: "Mercury", kind: "Rocky planet", about: "The smallest planet and the closest to the Sun. With almost no air to hold heat, it swings from about 430 °C by day to −180 °C by night.", radius: 0.22, texture: "/textures/2k_mercury.jpg", diameterKm: 4879, dayHours: 4222.6, spinHours: 1407.6, yearDays: 88.0, moons: "0", tempC: 167, tilt: 0.03 },
+  { name: "Venus", kind: "Rocky planet", about: "Nearly Earth's twin in size, but wrapped in thick clouds of sulphuric acid over a carbon-dioxide atmosphere that traps heat: the hottest planet of all.", radius: 0.4, texture: "/textures/2k_venus_atmosphere.jpg", diameterKm: 12_104, dayHours: 2802.0, spinHours: -5832.5, yearDays: 224.7, moons: "0", tempC: 464, tilt: 177.4 },
+  { name: "Earth", kind: "Rocky planet · home", about: "Our home, and the only world known to carry life. Oceans cover 71% of its surface; one large Moon steadies its tilt.", radius: 0.42, texture: "/textures/2k_earth_daymap.jpg", diameterKm: 12_756, dayHours: 24.0, spinHours: 23.93, yearDays: 365.26, moons: "1", tempC: 15, tilt: 23.4 },
+  { name: "Mars", kind: "Rocky planet", about: "A cold, dusty desert with the tallest volcano known, Olympus Mons, and dry riverbeds from a wetter past. Rovers are exploring it now.", radius: 0.3, texture: "/textures/2k_mars.jpg", diameterKm: 6792, dayHours: 24.7, spinHours: 24.62, yearDays: 687.0, moons: "2", tempC: -65, tilt: 25.2 },
+  { name: "Jupiter", kind: "Gas giant", about: "The largest planet, more than twice the mass of all the others together: a ball of hydrogen and helium with no solid surface, banded by storms.", radius: 1.3, texture: "/textures/2k_jupiter.jpg", diameterKm: 142_984, dayHours: 9.9, spinHours: 9.93, yearDays: 4331, moons: "95+", tempC: -110, tilt: 3.1 },
+  { name: "Saturn", kind: "Gas giant", about: "A gas giant less dense than water, circled by the brightest rings of any planet: ice and rock spread 280,000 km wide.", radius: 1.1, texture: "/textures/2k_saturn.jpg", ring: "/textures/2k_saturn_ring_alpha.png", diameterKm: 120_536, dayHours: 10.7, spinHours: 10.66, yearDays: 10_747, moons: "270+", tempC: -140, tilt: 26.7 },
+  { name: "Uranus", kind: "Ice giant", about: "An ice giant knocked onto its side: each pole spends 42 years in sunlight, then 42 in darkness. Only Voyager 2 has visited.", radius: 0.75, texture: "/textures/2k_uranus.jpg", diameterKm: 51_118, dayHours: 17.2, spinHours: -17.24, yearDays: 30_589, moons: "28+", tempC: -195, tilt: 97.8 },
+  { name: "Neptune", kind: "Ice giant", about: "The farthest planet, with the fastest winds measured anywhere in the Solar System, over 2,000 km/h. It was found by mathematics before it was seen, in 1846.", radius: 0.72, texture: "/textures/2k_neptune.jpg", diameterKm: 49_528, dayHours: 16.1, spinHours: 16.11, yearDays: 59_800, moons: "16", tempC: -200, tilt: 28.3 },
 ];
 
 export const bodyInfo = (name: BodyName) => BODIES.find((b) => b.name === name)!;

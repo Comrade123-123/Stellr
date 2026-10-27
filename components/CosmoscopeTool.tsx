@@ -31,11 +31,11 @@ const Scene = dynamic(() => import("@/components/canvas/CosmoscopeScene"), { ssr
 
 const DAY_MS = 86_400_000;
 /** Playback speeds, days per second; 0 is paused. */
-const SPEEDS: [string, number][] = [
-  ["DAY/S", 1],
-  ["WEEK/S", 7],
-  ["MONTH/S", 30],
-  ["YEAR/S", 365],
+const SPEEDS: [string, number, string][] = [
+  ["DAY/S", 1, "A DAY EVERY SECOND"],
+  ["WEEK/S", 7, "A WEEK EVERY SECOND"],
+  ["MONTH/S", 30, "A MONTH EVERY SECOND"],
+  ["YEAR/S", 365, "A YEAR EVERY SECOND"],
 ];
 /** The slider reaches this far either side of today; the date box goes anywhere. */
 const SLIDER_DAYS = 3650;
@@ -280,21 +280,42 @@ export default function CosmoscopeTool() {
         />
       </div>
 
+      {/* A soft shade behind the title, so it stays readable when a planet drifts behind it. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-0 top-0 hidden h-[340px] w-[680px] sm:block"
+        style={{ background: "radial-gradient(ellipse at 0% 0%, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.45) 45%, transparent 72%)" }}
+      />
       <header className="pointer-events-none absolute inset-x-0 top-0 flex flex-wrap items-start justify-between gap-4 p-5 sm:flex-nowrap sm:p-8">
         <div className="pointer-events-auto">
           <Link href="/" className="font-mono text-[11px] tracking-[0.2em] text-ink/60 transition-colors hover:text-gold">
             <ScrambleText text="← STELLR" />
           </Link>
           <h1 className="display mt-5 text-[clamp(1.6rem,3vw,2.8rem)] text-ink">Cosmoscope</h1>
-          <p className="caps mt-2 hidden max-w-[36ch] text-[11px] text-ink/55 sm:block sm:text-[12px]">
-            The Sun and planets exactly where they are, at any moment you choose. Click a world to fly there.
+          <p className="caps mt-2 text-[11px] text-ink/60 sm:hidden">A live map of the Solar System, at any moment.</p>
+          <p className="caps mt-2 hidden max-w-[40ch] text-[11px] leading-relaxed text-ink/60 sm:block sm:text-[12px]">
+            A live map of the Solar System. The Sun, the planets, their larger moons and four spacecraft, each exactly where it is at the
+            moment shown: now, or any date from 1900 to 2199.
           </p>
+          <p className="mt-3 hidden font-mono text-[10px] tracking-[0.18em] text-ink/40 lg:block">CLICK A NAME TO FLY THERE · DRAG TO TURN · SCROLL TO ZOOM</p>
         </div>
         <div className="pointer-events-auto flex flex-wrap gap-2 sm:max-w-[60%] sm:justify-end">
-          <button type="button" aria-pressed={trueScale} onClick={() => setTrueScale(!trueScale)} className={chip(trueScale)}>
+          <button
+            type="button"
+            aria-pressed={trueScale}
+            title="Show distances and sizes in their true proportions"
+            onClick={() => setTrueScale(!trueScale)}
+            className={chip(trueScale)}
+          >
             TRUE SCALE
           </button>
-          <button type="button" aria-pressed={hazard === "on"} onClick={toggleHazard} className={chip(hazard === "on", "border-[#ff6a3d] bg-[#ff6a3d] text-void")}>
+          <button
+            type="button"
+            aria-pressed={hazard === "on"}
+            title="Show every known potentially hazardous asteroid"
+            onClick={toggleHazard}
+            className={chip(hazard === "on", "border-[#ff6a3d] bg-[#ff6a3d] text-void")}
+          >
             {hazard === "loading" ? "HAZARDOUS…" : "HAZARDOUS"}
           </button>
         </div>
@@ -306,19 +327,20 @@ export default function CosmoscopeTool() {
         className="relative z-10 px-5 pt-4 sm:px-8 lg:absolute lg:bottom-8 lg:left-8 lg:right-[436px] lg:p-0"
       >
         <div className="frame bg-void/70 p-4 backdrop-blur-md">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 font-mono">
+          <p className="font-mono text-[9px] tracking-[0.2em] text-ink/40">THE MOMENT SHOWN</p>
+          <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 font-mono">
             <p className="text-sm tracking-[0.14em] text-ink tabular-nums">
               {shown ? fmt(shown, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }, "UTC") : "—"} UTC
             </p>
             <p className="text-[10px] tracking-[0.18em] text-ink/45">
               {mode.live ? (
                 <>
-                  <span className="text-gold">●</span> LIVE
+                  <span className="text-gold">●</span> LIVE · REAL TIME
                 </>
               ) : mode.rate ? (
-                `PLAYING ${reverse ? "BACKWARDS " : ""}· ${SPEEDS.find(([, r]) => r === mode.rate)?.[0] ?? ""}`
+                `${reverse ? "REWINDING" : "PLAYING"} · ${SPEEDS.find(([, r]) => r === mode.rate)?.[2] ?? ""}`
               ) : (
-                "PAUSED"
+                "PAUSED · PRESS NOW TO RETURN"
               )}
             </p>
           </div>
@@ -336,9 +358,9 @@ export default function CosmoscopeTool() {
             className="mt-3 w-full accent-[#c9a46a]"
           />
           <div className="mt-1 flex justify-between font-mono text-[9px] tracking-[0.16em] text-ink/35">
-            <span>−10 YEARS</span>
+            <span>10 YEARS AGO</span>
             <span>TODAY</span>
-            <span>+10 YEARS</span>
+            <span>10 YEARS AHEAD</span>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
@@ -383,7 +405,7 @@ export default function CosmoscopeTool() {
                 reverse ? "border-ink/80 bg-ink text-void" : "border-ink/25 text-ink/70 hover:border-ink/60"
               }`}
             >
-              ⇄ BACKWARDS
+              ⇄ REWIND
             </button>
             <label htmlFor="cosmo-date" className="sr-only">
               Go to date
@@ -401,7 +423,8 @@ export default function CosmoscopeTool() {
               className="h-7 rounded-full border border-ink/25 bg-void px-3 font-mono text-[10px] tracking-[0.12em] text-ink outline-none [color-scheme:dark] focus:border-ink/60"
             />
           </div>
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] tracking-[0.16em]">
+          <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 font-mono text-[10px] tracking-[0.16em]">
+            <span className="text-[9px] tracking-[0.2em] text-ink/40">JUMP TO</span>
             {presets.map((p) => (
               <button key={p.label} type="button" onClick={() => jump(p.t, p.body)} className="text-left text-ink/55 transition-colors hover:text-gold">
                 → {p.label}
@@ -420,6 +443,7 @@ export default function CosmoscopeTool() {
               </button>
               <h2 className="display mt-4 text-2xl text-ink">{info.name}</h2>
               <p className="mt-1 font-mono text-[10px] tracking-[0.16em] text-ink/45">{info.kind.toUpperCase()}</p>
+              <p className="mt-3 text-[13px] leading-relaxed text-ink/70">{info.about}</p>
 
               <dl className="mt-5 grid grid-cols-2 gap-4 font-mono">
                 {dist.earthAu !== null ? (
@@ -427,7 +451,7 @@ export default function CosmoscopeTool() {
                     <dt className="text-[10px] tracking-[0.2em] text-ink/45">FROM EARTH</dt>
                     <dd className="mt-1 text-sm text-gold">{kmText(dist.earthAu)}</dd>
                     <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">
-                      {auText(dist.earthAu)} · LIGHT TAKES {lightTime(dist.lightS!)}
+                      {auText(dist.earthAu)} · ITS LIGHT TAKES {lightTime(dist.lightS!)} TO REACH US
                     </dd>
                   </div>
                 ) : (
@@ -441,19 +465,22 @@ export default function CosmoscopeTool() {
                     <dt className="text-[10px] tracking-[0.2em] text-ink/45">FROM THE SUN</dt>
                     <dd className="mt-1 text-sm text-ink">{kmText(dist.sunAu)}</dd>
                     <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">
-                      {auText(dist.sunAu)} · SUNLIGHT TAKES {lightTime(dist.sunAu * 499.004784)}
+                      {auText(dist.sunAu)} · SUNLIGHT TAKES {lightTime(dist.sunAu * 499.004784)} TO GET THERE
                     </dd>
                   </div>
                 )}
                 <div>
-                  <dt className="text-[10px] tracking-[0.2em] text-ink/45">{info.name === "Sun" ? "ONE TURN" : "ONE DAY"}</dt>
+                  <dt className="text-[10px] tracking-[0.2em] text-ink/45">{info.name === "Sun" ? "ONE TURN" : "LENGTH OF A DAY"}</dt>
                   <dd className="mt-1 text-sm text-ink">{dayText(info.dayHours)}</dd>
-                  {info.spinHours < 0 && <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">SPINS BACKWARDS</dd>}
+                  <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">
+                    {info.name === "Sun" ? "AT ITS EQUATOR" : info.spinHours < 0 ? "SUNRISE TO SUNRISE · SPINS BACKWARDS" : "SUNRISE TO SUNRISE"}
+                  </dd>
                 </div>
                 {info.yearDays > 0 && (
                   <div>
-                    <dt className="text-[10px] tracking-[0.2em] text-ink/45">ONE YEAR</dt>
+                    <dt className="text-[10px] tracking-[0.2em] text-ink/45">LENGTH OF A YEAR</dt>
                     <dd className="mt-1 text-sm text-ink">{yearText(info.yearDays)}</dd>
+                    <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">ONE LAP OF THE SUN</dd>
                   </div>
                 )}
                 <div>
@@ -466,18 +493,19 @@ export default function CosmoscopeTool() {
                   )}
                 </div>
                 <div>
-                  <dt className="text-[10px] tracking-[0.2em] text-ink/45">{info.name === "Sun" ? "SURFACE" : "AVERAGE TEMP"}</dt>
+                  <dt className="text-[10px] tracking-[0.2em] text-ink/45">{info.name === "Sun" ? "SURFACE TEMPERATURE" : "AVERAGE TEMPERATURE"}</dt>
                   <dd className="mt-1 text-sm text-ink">{info.tempC.toLocaleString("en")} °C</dd>
                 </div>
                 {info.name !== "Sun" && (
                   <div>
-                    <dt className="text-[10px] tracking-[0.2em] text-ink/45">MOONS</dt>
+                    <dt className="text-[10px] tracking-[0.2em] text-ink/45">KNOWN MOONS</dt>
                     <dd className="mt-1 text-sm text-ink">{info.moons}</dd>
                   </div>
                 )}
                 <div>
                   <dt className="text-[10px] tracking-[0.2em] text-ink/45">AXIAL TILT</dt>
                   <dd className="mt-1 text-sm text-ink">{info.tilt}°</dd>
+                  <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">{info.tilt > 90 ? "TURNED OVER: IT SPINS BACKWARDS" : "LEAN OF ITS SPIN AXIS"}</dd>
                 </div>
               </dl>
 
@@ -510,7 +538,7 @@ export default function CosmoscopeTool() {
 
               {MOONS.some((m) => m.parent === info.name) && (
                 <div className="mt-5">
-                  <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">{trueScale ? "MOONS · SWITCH OFF TRUE SCALE TO SEE THEM" : "MOONS SHOWN"}</p>
+                  <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">{trueScale ? "MOONS · SWITCH OFF TRUE SCALE TO SEE THEM" : "ITS MOONS ON THE MAP · CHOOSE ONE TO FLY THERE"}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {MOONS.filter((m) => m.parent === info.name).map((m) => (
                       <button
@@ -529,16 +557,16 @@ export default function CosmoscopeTool() {
               {sky && (
                 <div className="mt-6 border-t border-ink/10 pt-5">
                   <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">
-                    {isTonight ? "TONIGHT" : `NIGHT OF ${fmt(shown, { day: "2-digit", month: "short", year: "numeric" }, tz)}`} · FROM {place?.name.toUpperCase()}
+                    CAN YOU SEE IT? · {isTonight ? "TONIGHT" : `NIGHT OF ${fmt(shown, { day: "2-digit", month: "short", year: "numeric" }, tz)}`} FROM {place?.name.toUpperCase()}
                   </p>
                   <p className="caps mt-2 text-[12px] leading-relaxed text-ink/80">
                     {sky.kind === "visible"
-                      ? `Visible to the eye. Best around ${fmt(sky.best.getTime(), { hour: "2-digit", minute: "2-digit" }, tz)}, ${Math.round(sky.altitude)}° up in the ${sky.direction}, at magnitude ${sky.magnitude.toFixed(1)}. Up from ${fmt(sky.from.getTime(), { hour: "2-digit", minute: "2-digit" }, tz)} to ${fmt(sky.until.getTime(), { hour: "2-digit", minute: "2-digit" }, tz)}.`
+                      ? `Yes. It is up from ${fmt(sky.from.getTime(), { hour: "2-digit", minute: "2-digit" }, tz)} to ${fmt(sky.until.getTime(), { hour: "2-digit", minute: "2-digit" }, tz)}; best around ${fmt(sky.best.getTime(), { hour: "2-digit", minute: "2-digit" }, tz)}, ${Math.round(sky.altitude)}° above the horizon in the ${sky.direction}, shining at magnitude ${sky.magnitude.toFixed(1)}${sky.magnitude < 0 ? ", brighter than almost every star" : ""}.`
                       : sky.kind === "glare"
-                        ? `Lost in the Sun's glare: only ${Math.round(sky.elongation)}° from it in the sky.`
+                        ? `No. It sits only ${Math.round(sky.elongation)}° from the Sun in the sky, lost in its glare.`
                         : sky.kind === "below"
-                          ? "Below the horizon all night from here."
-                          : "No proper night at this latitude on this date."}
+                          ? "No. It stays below the horizon all night from here."
+                          : "No proper night at this latitude on this date: the Sun never sets far enough."}
                   </p>
                   {(selected === "Uranus" || selected === "Neptune") && sky.kind === "visible" && (
                     <p className="mt-1 font-mono text-[10px] tracking-[0.12em] text-ink/45">
@@ -561,12 +589,12 @@ export default function CosmoscopeTool() {
               <dl className="mt-5 grid grid-cols-2 gap-4 font-mono">
                 <Fact wide label={`FROM ${moon.parent.toUpperCase()}`} value={`${moon.distanceKm.toLocaleString("en")} KM`} sub="ON AVERAGE" accent />
                 {objectDist && moon.parent !== "Earth" && (
-                  <Fact wide label="FROM EARTH" value={kmText(objectDist.earthAu)} sub={`LIGHT TAKES ${lightTime(objectDist.earthAu * AU_LIGHT_S)}`} />
+                  <Fact wide label="FROM EARTH" value={kmText(objectDist.earthAu)} sub={`ITS LIGHT TAKES ${lightTime(objectDist.earthAu * AU_LIGHT_S)} TO REACH US`} />
                 )}
                 {moon.parent === "Earth" && objectDist && (
-                  <Fact wide label="RIGHT NOW" value={`${Math.round(objectDist.earthAu * AU_KM).toLocaleString("en")} KM`} sub={`LIGHT TAKES ${lightTime(objectDist.earthAu * AU_LIGHT_S)}`} />
+                  <Fact wide label="FROM EARTH RIGHT NOW" value={`${Math.round(objectDist.earthAu * AU_KM).toLocaleString("en")} KM`} sub={`MOONLIGHT TAKES ${lightTime(objectDist.earthAu * AU_LIGHT_S)} TO REACH US`} />
                 )}
-                <Fact label="ONE ORBIT" value={dayText(moon.periodDays * 24)} />
+                <Fact label="ONE ORBIT" value={dayText(moon.periodDays * 24)} sub={`ONE LAP OF ${moon.parent.toUpperCase()}`} />
                 <Fact label="DIAMETER" value={`${moon.diameterKm.toLocaleString("en")} KM`} sub={`${(moon.diameterKm / 3475).toFixed(2)} × OUR MOON`} />
               </dl>
               <p className="caps mt-4 text-[11px] leading-relaxed text-ink/55">
@@ -617,8 +645,8 @@ export default function CosmoscopeTool() {
                 <dl className="mt-5 grid grid-cols-2 gap-4 font-mono">
                   <Fact wide accent label="FROM EARTH" value={kmText(objectDist.earthAu)} sub={`${auText(objectDist.earthAu)} · ${(objectDist.earthAu * AU_KM / 384_400).toFixed(1)} × THE MOON'S DISTANCE`} />
                   <Fact wide label="FROM THE SUN" value={kmText(objectDist.sunAu)} sub={auText(objectDist.sunAu)} />
-                  <Fact label="SUN DISTANCE RANGE" value={`${(rock.el.a * (1 - rock.el.e)).toFixed(2)}–${(rock.el.a * (1 + rock.el.e)).toFixed(2)} AU`} />
-                  <Fact label="ONE ORBIT" value={yearText(360 / (rock.el.n ?? 0.9856 / Math.pow(rock.el.a, 1.5)))} />
+                  <Fact label="CLOSEST–FARTHEST FROM THE SUN" value={`${(rock.el.a * (1 - rock.el.e)).toFixed(2)}–${(rock.el.a * (1 + rock.el.e)).toFixed(2)} AU`} />
+                  <Fact label="ONE LAP OF THE SUN" value={yearText(360 / (rock.el.n ?? 0.9856 / Math.pow(rock.el.a, 1.5)))} />
                 </dl>
               )}
               <p className="caps mt-4 text-[11px] leading-relaxed text-ink/55">
@@ -636,8 +664,12 @@ export default function CosmoscopeTool() {
               <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">
                 THE SOLAR SYSTEM · {shown ? fmt(shown, { day: "2-digit", month: "short", year: "numeric" }) : ""}
               </p>
-              <h2 className="display mt-3 text-2xl text-ink">Pick a world</h2>
-              <ul className="mt-4 divide-y divide-ink/10">
+              <h2 className="display mt-3 text-2xl text-ink">Where they are</h2>
+              <p className="mt-3 text-[13px] leading-relaxed text-ink/70">
+                How far each world is from Earth at the moment shown, and how long its light takes to reach us. Choose one to fly there.
+              </p>
+              <p className="mt-5 font-mono text-[10px] tracking-[0.2em] text-ink/45">THE SUN AND PLANETS</p>
+              <ul className="mt-1 divide-y divide-ink/10">
                 {table.map(({ name, d }) => (
                   <li key={name}>
                     <button
@@ -663,7 +695,7 @@ export default function CosmoscopeTool() {
                   </button>
                 </li>
               </ul>
-              <p className="mt-6 font-mono text-[10px] tracking-[0.2em] text-ink/45">SPACECRAFT</p>
+              <p className="mt-6 font-mono text-[10px] tracking-[0.2em] text-ink/45">SPACECRAFT · DISTANCE AND RADIO-SIGNAL TIME</p>
               <ul className="mt-1 divide-y divide-ink/10">
                 {craftTable.map(({ name, d }) => (
                   <li key={name}>
@@ -692,7 +724,6 @@ export default function CosmoscopeTool() {
                   </li>
                 )}
               </ul>
-              <p className="mt-3 font-mono text-[10px] tracking-[0.14em] text-ink/40">DISTANCES FROM EARTH AT THE MOMENT SHOWN</p>
             </div>
           )}
         </div>
@@ -711,10 +742,18 @@ export default function CosmoscopeTool() {
                 : <><span className="text-[#ff6a3d]">●</span> {Math.floor((swarm?.orbits.length ?? 0) / (swarm?.stride ?? 1)).toLocaleString("en")} POTENTIALLY HAZARDOUS ASTEROIDS, EACH ON ITS REAL ORBIT</>}
           </p>
         )}
-        <p className="mt-4 font-mono text-[10px] leading-relaxed tracking-[0.15em] text-ink/40">
-          PLANETS AND MOONS COMPUTED IN YOUR BROWSER WITH ASTRONOMY-ENGINE · TITAN AND SPACECRAFT FROM NASA JPL HORIZONS · DIRECTIONS TRUE;{" "}
-          {trueScale ? "DISTANCES AND SIZES TO SCALE" : "DISTANCES COMPRESSED, SIZES ENLARGED"} · FIGURES FROM NASA FACT SHEETS
-        </p>
+        <div className="mt-4 font-mono text-[10px] leading-relaxed tracking-[0.15em] text-ink/40">
+          <p className="text-ink/55">HOW TO READ THIS MAP</p>
+          <p className="mt-1">
+            {trueScale
+              ? "DISTANCES AND SIZES ARE IN TRUE PROPORTION."
+              : "DIRECTIONS ARE TRUE, BUT DISTANCES ARE SQUEEZED AND BODIES ENLARGED, OR THE OUTER PLANETS WOULD BE OFF SCREEN AND EVERY WORLD A SPECK. TRY TRUE SCALE TO SEE THE REAL THING."}{" "}
+            ECLIPTIC NORTH IS UP. AU = 149.6 MILLION KM, THE EARTH–SUN DISTANCE.
+          </p>
+          <p className="mt-2">
+            PLANETS AND MOONS COMPUTED IN YOUR BROWSER WITH ASTRONOMY-ENGINE · TITAN AND SPACECRAFT FROM NASA JPL HORIZONS · FIGURES FROM NASA FACT SHEETS
+          </p>
+        </div>
       </aside>
     </main>
   );
