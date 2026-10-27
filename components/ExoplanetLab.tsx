@@ -903,8 +903,10 @@ export default function ExoplanetLab() {
                         Gradient-boosted trees trained on {model.metrics.kepler.n.toLocaleString("en")} Kepler signals already judged planet or false
                         positive, from the signal&apos;s period, depth and duration alone. On signals it never saw it ranks a planet above a false
                         positive {Math.round(model.metrics.kepler.auc * 100)}% of the time
-                        {model.metrics.tess ? `; on TESS signals, from a different telescope, ${Math.round(model.metrics.tess.auc * 100)}%` : ""}. A
-                        score to weigh with the checks above, not a verdict.
+                        {model.metrics.tess ? `; on TESS signals, from a different telescope, ${Math.round(model.metrics.tess.auc * 100)}%` : ""}.
+                        {model.metrics.tess && model.metrics.tess.auc < 0.75
+                          ? " It carries over poorly from Kepler to TESS, so on this data treat it as a weak hint."
+                          : " A score to weigh with the checks above, not a verdict."}
                       </p>
                       <p className="mt-1 font-mono text-[10px] tracking-[0.12em] text-ink/35">TRAINED {model.trained} · NASA EXOPLANET ARCHIVE</p>
                     </>
