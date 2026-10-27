@@ -1,0 +1,29 @@
+# Trains Exoplanet Lab's transit vetter on NASA's Kepler signals and commits the model
+# (public/models/vetter.json). Runs on demand and once a month, as the archive's labels grow.
+name: Train exoplanet vetter
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 1 * *"
+
+permissions:
+  contents: write
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install scikit-learn==1.5.2 numpy==2.1.3
+      - run: python scripts/train_vetter.py public/models/vetter.json
+      - name: Commit the model if it changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/models/vetter.json
+          if git diff --cached --quiet; then echo "No change"; else git commit -m "Retrain the exoplanet vetter" && git push; fi

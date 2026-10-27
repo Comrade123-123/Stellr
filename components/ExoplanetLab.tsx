@@ -8,7 +8,9 @@ import {
   BTJD,
   CATALOG_FIELDS,
   EARTH_PER_SUN,
+  MAX_PLANET_RADIUS,
   fromTransit,
+  longestTransit,
   planetFromRow,
   relation,
   type BlsResult,
@@ -16,6 +18,7 @@ import {
   type Curve,
   type Planet,
 } from "@/lib/exoplanets";
+import { planetScore, vetFeatures, type VetterModel } from "@/lib/vetter";
 
 type Load = "idle" | "loading" | "ready" | "error";
 type Method = "all" | "Transit" | "Radial Velocity" | "other";
@@ -33,6 +36,24 @@ interface Target {
   label: string;
   host: string | null;
 }
+
+/** A TESS Object of Interest on the target star, with the follow-up team's verdict. */
+interface Toi {
+  toi: string;
+  disposition: string;
+  period: number | null;
+  depthPpm: number | null;
+  durationH: number | null;
+}
+
+const DISPOSITIONS: Record<string, string> = {
+  CP: "confirmed planet",
+  KP: "known planet",
+  PC: "planet candidate",
+  APC: "ambiguous planet candidate",
+  FP: "false positive",
+  FA: "false alarm",
+};
 
 /** One search's outcome: what was searched (after masking earlier signals), what was found, and the checks on it. */
 interface Signal {
@@ -61,7 +82,7 @@ const chip = (on: boolean) =>
   `rounded-full border px-3 py-1 font-mono text-[10px] tracking-[0.18em] transition-colors ${on ? "border-gold bg-gold text-void" : "border-ink/25 text-ink/70 hover:border-ink/60"}`;
 
 /** What a signal most likely is, by the checks this lab can run. Never "confirmed". */
-function verdict(s: Signal, known: Planet[]) {
+function verdict(s: Signal, known: Planet[], tois: Toi[] = [], starRadius: number | null = null) {
   const r = s.result;
   const c = s.checks;
   if (!r || !c || r.sde < MIN_SDE || r.snr < MIN_SNR) {
@@ -74,12 +95,31 @@ function verdict(s: Signal, known: Planet[]) {
     if (rel) return { kind: "alias" as const, title: `RELATED TO ${k.name.toUpperCase()}`, notes: [`At ${rel} of ${k.name}: most likely the same planet, seen at a multiple of its period.`] };
   }
   const notes: string[] = [];
+  const toi = tois.find((x) => x.period && relation(r.period, x.period) === "same period");
+  if (toi && (toi.disposition === "CP" || toi.disposition === "KP")) {
+    return { kind: "known" as const, title: `KNOWN PLANET RECOVERED · TOI-${toi.toi}`, notes: [`Same period as TOI-${toi.toi}, which the TESS follow-up team lists as a ${DISPOSITIONS[toi.disposition]}.`] };
+  }
+  if (toi && (toi.disposition === "FP" || toi.disposition === "FA")) notes.push(`The TESS follow-up team has already ruled this signal out: TOI-${toi.toi}, a ${DISPOSITIONS[toi.disposition]}.`);
   const oe = Math.abs(c.odd.depth - c.even.depth) / Math.hypot(c.odd.err, c.even.err);
   if (c.odd.n && c.even.n && oe > 3) notes.push("Odd and even transits differ in depth: the mark of an eclipsing binary star at half its true period.");
   if (c.secondary.n && c.secondary.depth / c.secondary.err > 3) notes.push("A dip half an orbit later (a secondary eclipse): a glowing companion star, not a planet.");
   if (r.depth > 0.03) notes.push("Over 3% deep: more likely a small star than a planet.");
+  if (c.shape.core > 0 && c.shape.edge < 0.5 * c.shape.core && (c.shape.core - c.shape.edge) / c.shape.err > 3)
+    notes.push("V-shaped rather than flat-bottomed: typical of two stars grazing each other.");
+  if (starRadius) {
+    const longest = longestTransit(r.period, starRadius);
+    if (r.duration > 1.5 * longest) notes.push(`Lasts ${r.duration.toFixed(1)} h, longer than a planet's transit can across this star (about ${longest.toFixed(1)} h at most).`);
+    if (Math.sqrt(r.depth) * starRadius * EARTH_PER_SUN > MAX_PLANET_RADIUS) notes.push("Too large for a planet: over twice Jupiter's size for this star.");
+  }
   if (r.transits < 3) notes.push("Fewer than three transits: the period is uncertain.");
   if (notes.length) return { kind: "doubt" as const, title: "SIGNAL · PROBABLY NOT A PLANET", notes };
+  if (toi) {
+    return {
+      kind: "toi" as const,
+      title: `ALREADY UNDER STUDY · TOI-${toi.toi}`,
+      notes: [`The TESS team flagged this same signal as TOI-${toi.toi}, now a ${DISPOSITIONS[toi.disposition] ?? (toi.disposition || "signal under review")}. Follow-up observations decide whether it is a planet.`],
+    };
+  }
   return {
     kind: "candidate" as const,
     title: "STELLR CANDIDATE · UNVETTED",
@@ -135,6 +175,9 @@ export default function ExoplanetLab() {
   const [searching, setSearching] = useState<number | null>(null);
   const [searchError, setSearchError] = useState("");
   const worker = useRef<Worker | null>(null);
+  const [model, setModel] = useState<VetterModel | null>(null);
+  const [modelLoad, setModelLoad] = useState<Load>("loading");
+  const [tois, setTois] = useState<Toi[]>([]);
 
   // The catalogue, once.
   useEffect(() => {
@@ -150,6 +193,14 @@ export default function ExoplanetLab() {
         setCatDetail(e instanceof Error ? e.message : "");
         setCatLoad("error");
       });
+    // The vetter, trained in GitHub Actions on NASA's Kepler signals.
+    fetch("/models/vetter.json")
+      .then(async (res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        setModel((await res.json()) as VetterModel);
+        setModelLoad("ready");
+      })
+      .catch(() => setModelLoad("error"));
     return () => worker.current?.terminate();
   }, []);
 
@@ -189,6 +240,13 @@ export default function ExoplanetLab() {
     setSearchError("");
     setDetail("");
     setSectorLoad("loading");
+    setTois([]);
+    fetch(`/api/exoplanets/toi?tic=${t.tic}`)
+      .then(async (res) => {
+        const data = (await res.json()) as { tois?: Toi[] };
+        if (res.ok && data.tois) setTois(data.tois);
+      })
+      .catch(() => {});
     fetch(`/api/exoplanets/sectors?tic=${t.tic}`)
       .then(async (res) => {
         const data = (await res.json()) as { sectors?: Sector[]; error?: boolean; detail?: string };
@@ -276,8 +334,14 @@ export default function ExoplanetLab() {
   };
 
   const latest = signals[signals.length - 1] ?? null;
-  const latestVerdict = latest ? verdict(latest, known) : null;
-  const found = signals.filter((s) => s.result && verdict(s, known).kind !== "none");
+  const judge = (s: Signal) => verdict(s, known, tois, star?.starRadius ?? null);
+  const latestVerdict = latest ? judge(latest) : null;
+  const found = signals.filter((s) => s.result && judge(s).kind !== "none");
+  const score = (s: Signal) => {
+    if (!model || !s.result) return null;
+    const x = vetFeatures(s.result.period, s.result.duration, s.result.depth);
+    return x ? planetScore(model, x) : null;
+  };
 
   // Chart layers.
   const curveLayers = useMemo<Layer[]>(() => (curve ? [{ kind: "points", x: curve.t, y: curve.f, color: INK, size: 1.5, alpha: 0.55 }] : []), [curve]);
@@ -360,12 +424,16 @@ export default function ExoplanetLab() {
     for (const s of sectors.filter((x) => chosen.includes(x.sector))) lines.push(`- TESS sector ${s.sector}: ${s.pipeline} pipeline, ${s.cadence}-second cadence, MAST observation ${s.obsid}`);
     lines.push(`- ${curve.t.length.toLocaleString("en")} points after quality filtering and 10-minute binning (PDCSAP flux, normalised)`, "");
     lines.push("## Method", "", "- Flattened with a ±0.5-day running median; bright outliers (>4σ) removed.", "- Box Least Squares search, periods 0.4 d to half the baseline (max 30 d), durations 0.75–12 h.", `- Detection bar: SDE ≥ ${MIN_SDE} and SNR ≥ ${MIN_SNR}. Earlier signals masked before each new search.`, "");
+    lines.push("## TESS Objects of Interest on this star", "");
+    if (tois.length) for (const x of tois) lines.push(`- TOI-${x.toi}: period ${fmtNum(x.period, 5)} d, ${DISPOSITIONS[x.disposition] ?? (x.disposition || "no disposition")}`);
+    else lines.push("- None listed.");
+    lines.push("");
     lines.push("## Known planets of this star (NASA Exoplanet Archive)", "");
     if (known.length) for (const k of known) lines.push(`- ${k.name}: period ${fmtNum(k.period, 5)} d, radius ${fmtNum(k.radius)} R⊕, found ${k.year ?? "?"} by ${k.method}`);
     else lines.push("- None listed.");
     lines.push("");
     signals.forEach((s, i) => {
-      const v = verdict(s, known);
+      const v = judge(s);
       lines.push(`## Search ${i + 1}: ${v.title}`, "");
       if (s.result && s.checks) {
         const r = s.result;
@@ -379,6 +447,8 @@ export default function ExoplanetLab() {
           `- SNR ${r.snr.toFixed(1)}, SDE ${r.sde.toFixed(1)}, ${r.transits} transits with data`,
           `- Odd vs even depth: ${depthText(c.odd.depth)} ± ${depthText(c.odd.err)} vs ${depthText(c.even.depth)} ± ${depthText(c.even.err)}`,
           `- Secondary eclipse (phase 0.5): ${depthText(Math.max(c.secondary.depth, 0))} ± ${depthText(c.secondary.err)}`,
+          `- Shape: edges ${depthText(Math.max(c.shape.edge, 0))} vs middle ${depthText(Math.max(c.shape.core, 0))} deep`,
+          ...(score(s) !== null && model ? [`- ML vetter: ${Math.round(score(s)! * 100)}% planet-like (gradient-boosted trees trained ${model.trained} on Kepler signals; Kepler AUC ${model.metrics.kepler.auc}${model.metrics.tess ? `, TESS AUC ${model.metrics.tess.auc}` : ""})`] : []),
         );
       }
       for (const n of v.notes) lines.push(`- ${n}`);
@@ -407,7 +477,7 @@ export default function ExoplanetLab() {
 
         <div className="mt-10 grid gap-6 lg:grid-cols-[380px_1fr] lg:items-start">
           {/* Catalogue */}
-          <aside className="flex flex-col gap-6 lg:sticky lg:top-6">
+          <aside className="flex flex-col gap-6">
             <section className="frame bg-void/70 p-5">
               <p className="font-mono text-[10px] tracking-[0.22em] text-ink/50">KNOWN WORLDS · NASA EXOPLANET ARCHIVE</p>
               {catLoad === "ready" ? (
@@ -536,6 +606,7 @@ export default function ExoplanetLab() {
                         TIC {target.tic}
                         {known.length ? ` · ${known.length} KNOWN PLANET${known.length > 1 ? "S" : ""}` : " · NO KNOWN PLANETS"}
                         {star?.starRadius ? ` · ${star.starRadius} × THE SUN'S SIZE` : ""}
+                        {tois.length ? ` · ${tois.length} TESS OBJECT${tois.length > 1 ? "S" : ""} OF INTEREST` : ""}
                       </p>
                     </>
                   ) : (
@@ -712,7 +783,7 @@ export default function ExoplanetLab() {
               <Section step="04" title="RESULT">
                 <p
                   className={`font-mono text-[12px] tracking-[0.18em] ${
-                    latestVerdict.kind === "candidate" ? "text-gold" : latestVerdict.kind === "known" || latestVerdict.kind === "alias" ? "text-ink" : "text-ink/60"
+                    latestVerdict.kind === "candidate" || latestVerdict.kind === "toi" ? "text-gold" : latestVerdict.kind === "known" || latestVerdict.kind === "alias" ? "text-ink" : "text-ink/60"
                   }`}
                 >
                   {latestVerdict.kind === "candidate" ? "◆ " : latestVerdict.kind === "known" ? "✓ " : latestVerdict.kind === "none" ? "○ " : "! "}
@@ -790,7 +861,21 @@ export default function ExoplanetLab() {
                       [sec <= 3, "NO SECONDARY ECLIPSE", `${depthText(Math.max(c.secondary.depth, 0))} at half an orbit · ${Math.max(sec, 0).toFixed(1)}σ`],
                       [latest.result!.depth <= 0.03, "SHALLOW ENOUGH FOR A PLANET", depthText(latest.result!.depth)],
                       [latest.result!.transits >= 3, "THREE OR MORE TRANSITS", `${latest.result!.transits} seen`],
+                      [
+                        !(c.shape.core > 0 && c.shape.edge < 0.5 * c.shape.core && (c.shape.core - c.shape.edge) / c.shape.err > 3),
+                        "FLAT-BOTTOMED, NOT V-SHAPED",
+                        `edges ${depthText(Math.max(c.shape.edge, 0))} vs middle ${depthText(Math.max(c.shape.core, 0))}`,
+                      ],
                     ];
+                    const R = star?.starRadius;
+                    if (R) {
+                      const longest = longestTransit(latest.result!.period, R);
+                      const size = Math.sqrt(latest.result!.depth) * R * EARTH_PER_SUN;
+                      rows.push([latest.result!.duration <= 1.5 * longest, "SHORT ENOUGH FOR AN ORBIT", `${latest.result!.duration.toFixed(1)} h · up to ~${longest.toFixed(1)} h here`]);
+                      rows.push([size <= MAX_PLANET_RADIUS, "PLANET-SIZED", `≈ ${size.toFixed(1)} × Earth`]);
+                    }
+                    const toi = tois.find((x) => x.period && relation(latest.result!.period, x.period) === "same period");
+                    if (toi) rows.push([toi.disposition !== "FP" && toi.disposition !== "FA", `TESS LISTS IT AS TOI-${toi.toi}`, DISPOSITIONS[toi.disposition] ?? (toi.disposition || "no verdict yet")]);
                     return rows.map(([ok, label, value]) => (
                       <li key={label} className="flex flex-wrap items-baseline justify-between gap-2 border-b border-ink/10 pb-2">
                         <span className={ok ? "text-ink" : "text-gold"}>
@@ -801,6 +886,35 @@ export default function ExoplanetLab() {
                     ));
                   })()}
                 </ul>
+
+                {/* Machine-learning vetter: a score with its track record, never a verdict on its own. */}
+                <div className="mt-6 border-t border-ink/10 pt-5">
+                  <p className="font-mono text-[10px] tracking-[0.22em] text-ink/50">ML VETTER · HOW PLANET-LIKE IS THIS SIGNAL?</p>
+                  {model && score(latest) !== null ? (
+                    <>
+                      <div className="mt-3 flex items-baseline gap-3">
+                        <span className="font-mono text-3xl text-ink">{Math.round(score(latest)! * 100)}%</span>
+                        <span className="font-mono text-[10px] tracking-[0.14em] text-ink/50">PLANET-LIKE</span>
+                      </div>
+                      <div className="mt-2 h-1.5 w-full max-w-[420px] rounded-full bg-ink/10" role="meter" aria-valuenow={Math.round(score(latest)! * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Planet-like score">
+                        <div className="h-1.5 rounded-full bg-gold" style={{ width: `${score(latest)! * 100}%` }} />
+                      </div>
+                      <p className="caps mt-3 max-w-[70ch] text-[11px] leading-relaxed text-ink/55">
+                        Gradient-boosted trees trained on {model.metrics.kepler.n.toLocaleString("en")} Kepler signals already judged planet or false
+                        positive, from the signal&apos;s period, depth and duration alone. On signals it never saw it ranks a planet above a false
+                        positive {Math.round(model.metrics.kepler.auc * 100)}% of the time
+                        {model.metrics.tess ? `; on TESS signals, from a different telescope, ${Math.round(model.metrics.tess.auc * 100)}%` : ""}. A
+                        score to weigh with the checks above, not a verdict.
+                      </p>
+                      <p className="mt-1 font-mono text-[10px] tracking-[0.12em] text-ink/35">TRAINED {model.trained} · NASA EXOPLANET ARCHIVE</p>
+                    </>
+                  ) : (
+                    <p className="mt-3 font-mono text-[11px] tracking-[0.14em] text-ink/50">
+                      {modelLoad === "loading" ? "LOADING THE MODEL…" : "THE MODEL HASN'T BEEN TRAINED YET."}
+                    </p>
+                  )}
+                </div>
+
                 <div className="mt-5 flex flex-wrap gap-3">
                   <button
                     type="button"
@@ -827,7 +941,7 @@ export default function ExoplanetLab() {
                   {signals.map((s, i) => (
                     <li key={i} className="flex flex-wrap justify-between gap-2 border-b border-ink/10 pb-2">
                       <span className="text-ink/80">
-                        {i + 1}. {verdict(s, known).title}
+                        {i + 1}. {judge(s).title}
                       </span>
                       <span className="text-[10px] text-ink/50">
                         {s.result ? `${s.result.period.toFixed(3)} D · ${depthText(s.result.depth)} · SNR ${s.result.snr.toFixed(0)}` : "—"}

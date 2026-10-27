@@ -296,6 +296,8 @@ export function measure(curve: Curve, period: number, t0: number, durationH: num
   const half = durationH / 24 / 2;
   const sigma = scatter(curve.f);
   const inside: number[] = [];
+  const core: number[] = [];
+  const edge: number[] = [];
   const odd: number[] = [];
   const even: number[] = [];
   const opposite: number[] = [];
@@ -306,6 +308,7 @@ export function measure(curve: Curve, period: number, t0: number, durationH: num
     const v = curve.f[i];
     if (Math.abs(dt) < half) {
       inside.push(v);
+      (Math.abs(dt) < half / 2 ? core : edge).push(v);
       const epoch = Math.round((curve.t[i] - t0) / period);
       epochs.add(epoch);
       (epoch % 2 === 0 ? even : odd).push(v);
@@ -326,6 +329,8 @@ export function measure(curve: Curve, period: number, t0: number, durationH: num
     odd: { depth: base - avg(odd), err: err(odd.length), n: odd.length },
     even: { depth: base - avg(even), err: err(even.length), n: even.length },
     secondary: { depth: base - avg(opposite), err: err(opposite.length), n: opposite.length },
+    /** The middle half of the transit against its outer half: a flat-bottomed (U) dip has them alike; a V-shaped one, typical of grazing eclipsing stars, is much shallower at the edges. */
+    shape: { core: base - avg(core), edge: base - avg(edge), err: Math.hypot(err(core.length), err(edge.length)) },
   };
 }
 
@@ -355,3 +360,14 @@ export function relation(found: number, known: number): string | null {
 
 /** Earth radii per solar radius. */
 export const EARTH_PER_SUN = 109.1;
+
+/**
+ * The longest a transit can last, in hours, for a planet crossing the middle of a star of
+ * `starRadius` solar radii: 13 h for Earth around the Sun, scaling with P^(1/3) and with the
+ * star's size over the cube root of its mass. The mass is taken as ≈ its radius (true for
+ * Sun-like and smaller main-sequence stars), so this is approximate.
+ */
+export const longestTransit = (period: number, starRadius: number) => 13 * Math.cbrt(period / 365.25) * Math.pow(starRadius, 2 / 3);
+
+/** Twice Jupiter's radius, in Earth radii: anything larger is a star, not a planet. */
+export const MAX_PLANET_RADIUS = 22.4;
