@@ -1,8 +1,10 @@
 "use client";
 
 import { useRef } from "react";
+import Link from "next/link";
 import { useReveal } from "@/components/ui/useReveal";
 import IndexBar from "@/components/ui/IndexBar";
+import ScrambleText from "@/components/ui/ScrambleText";
 import SplitWords from "@/components/ui/SplitWords";
 import { useNow } from "@/lib/time";
 
@@ -33,6 +35,12 @@ export default function Cosmoscope() {
           Cosmoscope places every planet at its real position for today, then lets you fly between them.
           Sizes and distances are compressed — space is mostly empty.
         </p>
+        <Link
+          href="/cosmoscope"
+          className="reveal-fade mt-8 inline-block rounded-full bg-ink px-5 py-2.5 text-[12px] font-semibold tracking-[0.08em] text-void transition-colors hover:bg-gold"
+        >
+          <ScrambleText text="OPEN COSMOSCOPE →" />
+        </Link>
       </div>
 
       <p className="reveal-fade mt-auto mb-24 font-mono text-[10px] tracking-[0.22em] text-ink/45 sm:text-right">

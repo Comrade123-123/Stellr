@@ -11,8 +11,8 @@ const PHASES: { phase: string; name: string; body: string; status: string; live?
   { phase: "03", name: "Sky Events", body: "Meteor showers, eclipses and launches, timed to where you are.", status: "LIVE", live: true },
   { phase: "04", name: "Space Weather", body: "Flares, the solar wind and aurora as they develop.", status: "LIVE", live: true },
   { phase: "05", name: "Asteroid Sentinel", body: "Near-Earth objects on approach, plotted in 3D.", status: "LIVE", live: true },
-  { phase: "06", name: "Cosmoscope", body: "Fly between the planets at their real positions.", status: "NEXT" },
-  { phase: "07", name: "Exoplanet Lab", body: "Worlds around other stars, found the way astronomers find them.", status: "PLANNED" },
+  { phase: "06", name: "Cosmoscope", body: "Fly between the planets at their real positions.", status: "LIVE", live: true },
+  { phase: "07", name: "Exoplanet Lab", body: "Worlds around other stars, found the way astronomers find them.", status: "NEXT" },
   { phase: "08", name: "Anveshak", body: "A research agent for questions about the sky.", status: "EXPLORING" },
 ];
 
