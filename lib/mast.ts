@@ -67,7 +67,10 @@ export async function lightCurveFile(obsid: string, agent = "Stellr Exoplanet La
   const lc =
     products.find((p) => /_lc\.fits$/i.test(String(p.productFilename ?? "")) && String(p.productSubGroupDescription ?? "LC") === "LC") ??
     products.find((p) => /lc\.fits$/i.test(String(p.productFilename ?? "")));
-  if (!lc) throw new Error("no light-curve file for this observation");
+  if (!lc) {
+    const names = products.map((p) => String(p.productFilename ?? "")).filter(Boolean);
+    throw new Error(`no light-curve file for this observation (${names.length} products${names.length ? `: ${names.slice(0, 3).join(", ")}` : ""})`);
+  }
   const res = await fetch(`${MAST}/api/v0.1/Download/file?uri=${encodeURIComponent(String(lc.dataURI))}`, {
     cache: "no-store",
     headers: { "User-Agent": agent },

@@ -36,6 +36,7 @@ interface Investigation {
   known: string[];
   findings: Finding[];
   quiet: { sde: number; snr: number } | null;
+  skipped?: string;
   error?: string;
 }
 
@@ -253,6 +254,7 @@ export default function Wobble() {
                 {i.sectors.length ? ` · SECTORS ${i.sectors.join(", ")} · ${i.days} DAYS` : ""}
                 {i.known.length ? ` · KNOWN: ${i.known.join(", ")}` : ""}
               </p>
+              {i.skipped && <p className="mt-1 font-mono text-[9px] tracking-[0.08em] text-ink/35">SKIPPED {i.skipped.toUpperCase()}</p>}
               <div className="mt-4 space-y-4">
                 {i.error ? (
                   <p className="caps text-[11px] text-ink/50">Couldn&apos;t investigate: {i.error}.</p>

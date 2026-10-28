@@ -66,6 +66,8 @@ interface Investigation {
   findings: Finding[];
   /** The strongest peak when nothing passed the bar. */
   quiet: { sde: number; snr: number } | null;
+  /** Sectors that couldn't be read, when others could. */
+  skipped?: string;
   error?: string;
 }
 
@@ -160,8 +162,18 @@ async function investigate(tic: string, label: string, reason: Investigation["re
     const chosen = sectors.slice(-SECTORS_PER_STAR);
     if (!chosen.length) throw new Error("no TESS light curve");
     record.sectors = chosen.map((s) => s.sector);
+    // A sector that fails (a missing file, a bad download) is skipped; the rest still count.
     const parts = [];
-    for (const s of chosen) parts.push(lightCurveFromFits(await lightCurveFile(s.obsid, AGENT)));
+    const failures: string[] = [];
+    for (const s of chosen) {
+      try {
+        parts.push(lightCurveFromFits(await lightCurveFile(s.obsid, AGENT)));
+      } catch (e) {
+        failures.push(`sector ${s.sector}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (!parts.length) throw new Error(failures.join("; "));
+    if (failures.length) record.skipped = failures.join("; ");
     parts.sort((a, b) => a.t[0] - b.t[0]);
     const curve: Curve = { t: Float64Array.from(parts.flatMap((p) => p.t)), f: Float64Array.from(parts.flatMap((p) => p.f)) };
     record.points = curve.t.length;
@@ -225,15 +237,34 @@ async function main() {
   const toiStars = new Set(tois.map((r) => String(r.tid)));
   const hosts = new Set((await tap("select distinct tic_id from pscomppars where tic_id is not null")).map((r) => String(r.tic_id ?? "").replace(/^TIC\s*/i, "")));
 
+  /**
+   * Worth an investigation: TESS has a light curve for it and, for a blind search, it is a
+   * dwarf star (under 2.5 solar radii) bright enough (TESS magnitude ≤ 13) for small dips to show.
+   */
+  const eligible = async (tic: string, blind: boolean) => {
+    try {
+      if (!(await tessSectors(tic)).length) return false;
+      if (!blind) return true;
+      const s = await ticStar(tic);
+      return !!s && s.tmag !== null && s.tmag <= 13 && s.radius !== null && s.radius < 2.5;
+    } catch {
+      return false;
+    }
+  };
+  const MAX_TRIES = 40;
+
   // Half the run: open planet candidates, re-examined.
   const pcs = shuffle(
     tois.filter((r) => r.tfopwg_disp === "PC" && !seen.has(String(r.tid))),
     rnd,
   );
   const picks: { tic: string; label: string; reason: Investigation["reason"] }[] = [];
+  let tries = 0;
   for (const r of pcs) {
-    if (picks.length >= Math.ceil(TARGETS / 2)) break;
-    if (!picks.some((p) => p.tic === String(r.tid))) picks.push({ tic: String(r.tid), label: `TOI-${Math.floor(Number(r.toi))}`, reason: "candidate" });
+    if (picks.length >= Math.ceil(TARGETS / 2) || tries++ >= MAX_TRIES) break;
+    const t = String(r.tid);
+    if (picks.some((p) => p.tic === t) || !(await eligible(t, false))) continue;
+    picks.push({ tic: t, label: `TOI-${Math.floor(Number(r.toi))}`, reason: "candidate" });
   }
   // The rest: stars watched closely in a sector, with nothing known about them.
   const sector = 1 + Math.floor(rnd() * Math.max(1, latestSector()));
@@ -254,9 +285,10 @@ async function main() {
     [...new Set(watched.map((r) => String(r.target_name ?? "")))].filter((t) => /^\d+$/.test(t) && !toiStars.has(t) && !hosts.has(t) && !seen.has(t)),
     rnd,
   );
+  tries = 0;
   for (const t of quiet) {
-    if (picks.length >= TARGETS) break;
-    picks.push({ tic: t, label: `TIC ${t}`, reason: "blind" });
+    if (picks.length >= TARGETS || tries++ >= MAX_TRIES) break;
+    if (await eligible(t, true)) picks.push({ tic: t, label: `TIC ${t}`, reason: "blind" });
   }
   console.log(`sector ${sector}: ${quiet.length} unknown stars to choose from; investigating ${picks.length}`);
 
