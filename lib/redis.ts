@@ -2,7 +2,7 @@
  * Upstash Redis over its REST API, server side only: no client library to bundle. Vercel's
  * Upstash integration sets the connection as KV_REST_API_URL / KV_REST_API_TOKEN (older
  * projects) or UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN; either pair works. Used by
- * the waitlist, Wobble's sign-in and Wobble's notebook (written from GitHub Actions too).
+ * the old waitlist's export, Wobble's sign-in and Wobble's notebook (written from GitHub Actions too).
  */
 
 function connection() {

@@ -67,10 +67,10 @@ export default function Header() {
 
         <div className="flex justify-end">
           <a
-            href="#waitlist"
+            href="#tools"
             className="rounded-full border border-ink/40 px-4 py-2 text-[11px] font-semibold tracking-[0.12em] text-ink transition-colors hover:border-ink hover:bg-ink hover:text-void sm:px-5"
           >
-            <ScrambleText text="WAITLIST" />
+            <ScrambleText text="TOOLS" />
           </a>
         </div>
       </div>

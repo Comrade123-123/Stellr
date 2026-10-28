@@ -4,11 +4,11 @@ import { useRef } from "react";
 import { useReveal } from "@/components/ui/useReveal";
 import IndexBar from "@/components/ui/IndexBar";
 import SplitWords from "@/components/ui/SplitWords";
-import WaitlistForm from "@/components/WaitlistForm";
+import StartLinks from "@/components/StartLinks";
 
 /**
  * Sunrise from orbit: the headline sits in the dark sky above Earth's horizon,
- * the copy and waitlist below it over the planet's night side.
+ * the copy and the ways in below it over the planet's night side.
  */
 export default function Hero() {
   const root = useRef<HTMLElement>(null);
@@ -36,7 +36,7 @@ export default function Hero() {
           sky events and space weather — rendered in real-time 3D. No installs. Open a tab and look up.
         </p>
         <div className="reveal-fade mt-8 flex w-full justify-center">
-          <WaitlistForm />
+          <StartLinks />
         </div>
       </div>
     </section>

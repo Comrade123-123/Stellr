@@ -22,7 +22,7 @@ const COLUMNS: { title: string; links: [string, string][] }[] = [
     title: "STELLR",
     links: [
       ["ROADMAP", "#roadmap"],
-      ["JOIN THE WAITLIST", "#waitlist"],
+      ["START EXPLORING", "#start"],
       ["BACK TO TOP", "#top"],
     ],
   },

@@ -1,22 +1,11 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-## Waitlist
+## Waitlist (closed)
 
-Sign-ups post to `/api/waitlist` and are stored in Upstash Redis (one hash, `waitlist:emails`:
-lower-cased email → first sign-up time). Duplicates are reported, not stored twice; a hidden
-honeypot field catches simple bots, and each IP gets 5 sign-ups a minute.
-
-Setup on Vercel:
-
-1. Project → **Storage** → **Upstash for Redis** → create (free plan) and connect it to this project.
-   That sets `KV_REST_API_URL` / `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`).
-2. Project → Settings → Environment Variables → add `WAITLIST_ADMIN_TOKEN`, a long random password.
-3. Redeploy, so the new variables reach the running site.
-
-Until storage is connected the form answers "Sign-ups open shortly" rather than pretending to save.
-
-Export every sign-up as CSV: open `/api/waitlist/export?token=<WAITLIST_ADMIN_TOKEN>`, or send the
-token as `Authorization: Bearer <token>`. Without `WAITLIST_ADMIN_TOKEN` set, that route returns 404.
+Every tool is open, so the landing page no longer collects emails. Sign-ups made earlier are still
+in Upstash Redis (hash `waitlist:emails`). Export them as CSV from
+`/api/waitlist/export?token=<WAITLIST_ADMIN_TOKEN>` (or `Authorization: Bearer <token>`); without
+`WAITLIST_ADMIN_TOKEN` set, that route returns 404.
 
 ## Getting Started
 
