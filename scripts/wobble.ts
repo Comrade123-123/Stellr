@@ -1,8 +1,9 @@
 /**
  * Wobble, Stellr's research agent: each run it chooses stars on its own, investigates their
  * TESS light curves with the same pipeline as Exoplanet Lab, and records what it finds in
- * public/wobble/log.json, which the /wobble page shows. Run daily by
- * .github/workflows/wobble.yml; free, with no keys.
+ * Upstash Redis, which the password-protected /wobble page reads. Run daily by
+ * .github/workflows/wobble.yml. The repository and its Actions logs are public, so findings
+ * go only to Redis and the log prints counts, never results.
  *
  * Each run looks at two kinds of star:
  *  - TESS Objects of Interest still marked "planet candidate", re-examined independently;
@@ -12,12 +13,14 @@
  * three times (hiding each signal before looking for the next), and judges every signal with
  * the shared checks (lib/verdict.ts), the ML vetter and the star's catalogue values.
  *
- *     npx tsx scripts/wobble.ts public/wobble/log.json
+ *     npx tsx scripts/wobble.ts            (writes to Redis: UPSTASH_REDIS_REST_URL / _TOKEN)
+ *     npx tsx scripts/wobble.ts out.json   (tests: writes a file instead)
  *
  * WOBBLE_TARGETS sets how many stars per run (default 8); EXO_BASE and MAST_BASE point it at
  * local stand-ins for tests.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { isConfigured, pipeline } from "../lib/redis";
 import { dirname } from "node:path";
 import { bls, flatten, fromTransit, mask, measure, relation, EARTH_PER_SUN, type Curve } from "../lib/exoplanets";
 import { lightCurveFromFits } from "../lib/lightcurve";
@@ -26,7 +29,9 @@ import { verdict, type Toi } from "../lib/verdict";
 import { planetScore, vetFeatures, type VetterModel } from "../lib/vetter";
 import { describe, KIND_LABEL } from "../lib/worlds";
 
-const OUT = process.argv[2] ?? "public/wobble/log.json";
+/** A file to write instead of Redis, for tests. */
+const FILE = process.argv[2] ?? null;
+const KEEP_REDIS = 500;
 const EXO = process.env.EXO_BASE ?? "https://exoplanetarchive.ipac.caltech.edu";
 const TARGETS = Number(process.env.WOBBLE_TARGETS ?? 8);
 const SECTORS_PER_STAR = 3;
@@ -225,8 +230,10 @@ async function investigate(tic: string, label: string, reason: Investigation["re
 const latestSector = () => Math.floor((Date.now() - Date.UTC(2018, 6, 25)) / (27.4 * 86_400_000)) - 1;
 
 async function main() {
-  const log: Log = existsSync(OUT) ? (JSON.parse(readFileSync(OUT, "utf8")) as Log) : { updated: "", runs: [], investigations: [] };
+  if (!FILE && !isConfigured()) throw new Error("Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN (repository secrets) so Wobble can keep its notebook.");
+  const log: Log = FILE && existsSync(FILE) ? (JSON.parse(readFileSync(FILE, "utf8")) as Log) : { updated: "", runs: [], investigations: [] };
   const seen = new Set(log.investigations.map((i) => i.tic));
+  if (!FILE) for (const t of ((await pipeline([["SMEMBERS", "wobble:tics"]]))[0] as string[] | null) ?? []) seen.add(t);
   const rnd = seeded(Math.floor(Date.now() / 86_400_000));
   let model: VetterModel | null = null;
   try {
@@ -292,21 +299,34 @@ async function main() {
     if (picks.length >= TARGETS || tries++ >= MAX_TRIES) break;
     if (await eligible(t, true)) picks.push({ tic: t, label: `TIC ${t}`, reason: "blind" });
   }
-  console.log(`sector ${sector}: ${quiet.length} unknown stars to choose from; investigating ${picks.length}`);
+  console.log(`investigating ${picks.length} stars`);
 
   const results: Investigation[] = [];
   for (const p of picks) {
     const r = await investigate(p.tic, p.label, p.reason, model);
-    console.log(`${p.label}: ${r.error ?? (r.findings.map((f) => f.title).join("; ") || "nothing above the bar")}`);
     results.push(r);
   }
 
-  log.investigations = [...results, ...log.investigations].slice(0, KEEP);
-  log.runs = [{ at: new Date().toISOString(), investigated: results.length, candidates: results.reduce((a, r) => a + r.findings.filter((f) => f.kind === "candidate").length, 0) }, ...log.runs].slice(0, 60);
-  log.updated = new Date().toISOString();
-  mkdirSync(dirname(OUT), { recursive: true });
-  writeFileSync(OUT, JSON.stringify(log));
-  console.log(`wrote ${OUT}: ${log.investigations.length} investigations`);
+  const run = { at: new Date().toISOString(), investigated: results.length, candidates: results.reduce((a, r) => a + r.findings.filter((f) => f.kind === "candidate").length, 0) };
+  if (FILE) {
+    log.investigations = [...results, ...log.investigations].slice(0, KEEP);
+    log.runs = [run, ...log.runs].slice(0, 60);
+    log.updated = run.at;
+    mkdirSync(dirname(FILE), { recursive: true });
+    writeFileSync(FILE, JSON.stringify(log));
+  } else {
+    // Newest at the head of the list.
+    await pipeline([
+      ...[...results].reverse().map((r) => ["LPUSH", "wobble:investigations", JSON.stringify(r)]),
+      ["LTRIM", "wobble:investigations", 0, KEEP_REDIS - 1],
+      ...(results.length ? [["SADD", "wobble:tics", ...results.map((r) => r.tic)]] : []),
+      ["LPUSH", "wobble:runs", JSON.stringify(run)],
+      ["LTRIM", "wobble:runs", 0, 59],
+      ["SET", "wobble:updated", run.at],
+    ]);
+  }
+  // Counts only: this log is public.
+  console.log(`done: ${results.length} investigated, ${results.filter((r) => r.error).length} could not be read`);
 }
 
 main().catch((e) => {

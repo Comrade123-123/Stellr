@@ -89,7 +89,7 @@ export default function Tools() {
         </ul>
 
         <p className="reveal-fade mt-8 font-mono text-[11px] tracking-[0.18em] text-ink/45">
-          ALSO LIVE — COSMOSCOPE · EXOPLANET LAB · WOBBLE
+          ALSO LIVE — COSMOSCOPE · EXOPLANET LAB · WOBBLE (BY INVITATION)
         </p>
       </div>
     </section>

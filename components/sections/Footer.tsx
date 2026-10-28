@@ -15,7 +15,7 @@ const COLUMNS: { title: string; links: [string, string][] }[] = [
     links: [
       ["COSMOSCOPE", "/cosmoscope"],
       ["EXOPLANET LAB", "/exoplanet-lab"],
-      ["WOBBLE", "/wobble"],
+      ["WOBBLE · BY INVITATION", "/wobble"],
     ],
   },
   {

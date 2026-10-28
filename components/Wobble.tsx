@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Plot from "@/components/charts/Plot";
 import ScrambleText from "@/components/ui/ScrambleText";
@@ -133,19 +133,69 @@ function FindingCard({ f }: { f: Finding }) {
 /** Wobble's notebook: every star the agent has investigated, newest first. */
 export default function Wobble() {
   const [log, setLog] = useState<Log | null>(null);
-  const [load, setLoad] = useState<"loading" | "ready" | "empty">("loading");
+  const [total, setTotal] = useState(0);
+  const [load, setLoad] = useState<"loading" | "ready" | "empty" | "error">("loading");
   const [filter, setFilter] = useState<Filter>("all");
   const [shown, setShown] = useState(PAGE);
+  /** Wobble is private: signed in with its password, or not. */
+  const [auth, setAuth] = useState<"checking" | "out" | "locked" | "in">("checking");
+  const [password, setPassword] = useState("");
+  const [signing, setSigning] = useState(false);
+  const [authError, setAuthError] = useState("");
+
+  const loadPage = useCallback((offset: number) => {
+    setLoad("loading");
+    fetch(`/api/wobble/log?offset=${offset}`, { cache: "no-store" })
+      .then(async (res) => {
+        if (res.status === 401) return setAuth("out");
+        if (!res.ok) throw new Error(String(res.status));
+        const data = (await res.json()) as Log & { total: number };
+        setTotal(data.total);
+        setLog((prev) => ({
+          updated: data.updated,
+          runs: data.runs,
+          investigations: offset ? [...(prev?.investigations ?? []), ...data.investigations] : data.investigations,
+        }));
+        setLoad(data.total ? "ready" : "empty");
+      })
+      .catch(() => setLoad("error"));
+  }, []);
 
   useEffect(() => {
-    fetch("/wobble/log.json", { cache: "no-cache" })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(String(res.status));
-        setLog((await res.json()) as Log);
-        setLoad("ready");
+    fetch("/api/wobble/session", { cache: "no-store" })
+      .then((res) => res.json() as Promise<{ signedIn: boolean; locked: boolean }>)
+      .then((s) => {
+        if (s.locked) return setAuth("locked");
+        setAuth(s.signedIn ? "in" : "out");
+        if (s.signedIn) loadPage(0);
       })
-      .catch(() => setLoad("empty"));
-  }, []);
+      .catch(() => setAuth("out"));
+  }, [loadPage]);
+
+  const signIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSigning(true);
+    setAuthError("");
+    try {
+      const res = await fetch("/api/wobble/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+      const { status } = (await res.json().catch(() => ({}))) as { status?: string };
+      if (status === "ok") {
+        setPassword("");
+        setAuth("in");
+        loadPage(0);
+      } else
+        setAuthError(status === "rate_limited" ? "TOO MANY TRIES. WAIT A MINUTE." : status === "locked" ? "WOBBLE ISN'T OPEN YET." : "THAT'S NOT THE PASSWORD.");
+    } catch {
+      setAuthError("COULDN'T REACH STELLR. TRY AGAIN.");
+    }
+    setSigning(false);
+  };
+
+  const signOut = async () => {
+    await fetch("/api/wobble/logout", { method: "POST" }).catch(() => {});
+    setLog(null);
+    setAuth("out");
+  };
 
   const all = useMemo(() => log?.investigations ?? [], [log]);
   const list = useMemo(() => all.filter((i) => matches(i, filter)), [all, filter]);
@@ -172,10 +222,50 @@ export default function Wobble() {
           with Exoplanet Lab&apos;s methods, and writes down what it finds.
         </p>
 
+        {auth !== "in" ? (
+          <section className="frame mt-10 max-w-[480px] bg-void/70 p-6">
+            <p className="font-mono text-[10px] tracking-[0.22em] text-ink/50">PRIVATE · BY INVITATION</p>
+            {auth === "checking" ? (
+              <p className="mt-4 font-mono text-[11px] tracking-[0.16em] text-ink/55">CHECKING…</p>
+            ) : auth === "locked" ? (
+              <p className="caps mt-4 text-[12px] leading-relaxed text-ink/65">Wobble isn&apos;t open yet.</p>
+            ) : (
+              <form onSubmit={signIn} className="mt-4">
+                <p className="caps text-[12px] leading-relaxed text-ink/65">Wobble&apos;s notebook is shared with invited researchers. Enter the password you were given.</p>
+                <label htmlFor="wobble-password" className="sr-only">
+                  Password
+                </label>
+                <div className="mt-4 flex gap-2">
+                  <input
+                    id="wobble-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="PASSWORD"
+                    className="h-10 min-w-0 flex-1 rounded-full border border-ink/25 bg-void px-4 font-mono text-[12px] tracking-[0.12em] text-ink outline-none placeholder:text-ink/35 focus:border-ink/60"
+                  />
+                  <button
+                    type="submit"
+                    disabled={signing || !password}
+                    className="h-10 shrink-0 rounded-full bg-ink px-5 font-mono text-[11px] font-semibold tracking-[0.12em] text-void transition-colors hover:bg-gold disabled:opacity-50"
+                  >
+                    {signing ? "OPENING…" : "OPEN"}
+                  </button>
+                </div>
+                <p className={`mt-3 font-mono text-[10px] tracking-[0.14em] text-gold ${authError ? "" : "invisible"}`} role="alert">
+                  {authError || "·"}
+                </p>
+              </form>
+            )}
+          </section>
+        ) : (
+          <>
         <div className="mt-10 grid gap-6 lg:grid-cols-[1fr_1fr]">
           <section className="frame bg-void/70 p-5">
             <p className="font-mono text-[10px] tracking-[0.22em] text-ink/50">
               NOTEBOOK{log?.updated ? ` · LAST RUN ${when(log.updated)}` : ""}
+              {total > (log?.investigations.length ?? 0) ? ` · LATEST ${log?.investigations.length} OF ${total}` : ""}
             </p>
             <dl className="mt-4 grid grid-cols-3 gap-4 font-mono sm:grid-cols-5">
               {[
@@ -230,6 +320,7 @@ export default function Wobble() {
 
         {load === "loading" && <p className="mt-8 font-mono text-[11px] tracking-[0.16em] text-ink/55">OPENING THE NOTEBOOK…</p>}
         {load === "empty" && <p className="mt-8 font-mono text-[11px] tracking-[0.16em] text-ink/55">WOBBLE HASN&apos;T RUN YET. ITS FIRST INVESTIGATIONS WILL APPEAR HERE.</p>}
+        {load === "error" && <p className="mt-8 font-mono text-[11px] tracking-[0.16em] text-ink/55">THE NOTEBOOK DIDN&apos;T OPEN. TRY AGAIN SHORTLY.</p>}
         {load === "ready" && !list.length && <p className="mt-8 font-mono text-[11px] tracking-[0.16em] text-ink/55">NOTHING HERE YET.</p>}
 
         <ol className="mt-8 grid gap-6 lg:grid-cols-2">
@@ -269,14 +360,24 @@ export default function Wobble() {
             </li>
           ))}
         </ol>
-        {list.length > shown && (
-          <button
-            type="button"
-            onClick={() => setShown(shown + PAGE)}
-            className="mt-8 rounded-full border border-ink/30 px-5 py-2.5 font-mono text-[10px] tracking-[0.16em] text-ink/85 hover:border-ink/70"
-          >
-            SHOW MORE ({list.length - shown} LEFT)
+        <div className="mt-8 flex flex-wrap gap-3">
+          {(list.length > shown || (log && log.investigations.length < total)) && (
+            <button
+              type="button"
+              onClick={() => {
+                if (list.length > shown) setShown(shown + PAGE);
+                else if (log) loadPage(log.investigations.length);
+              }}
+              className="rounded-full border border-ink/30 px-5 py-2.5 font-mono text-[10px] tracking-[0.16em] text-ink/85 hover:border-ink/70"
+            >
+              SHOW MORE
+            </button>
+          )}
+          <button type="button" onClick={signOut} className="rounded-full border border-ink/20 px-5 py-2.5 font-mono text-[10px] tracking-[0.16em] text-ink/55 hover:border-ink/60">
+            SIGN OUT
           </button>
+        </div>
+          </>
         )}
 
         <p className="mt-10 max-w-[90ch] font-mono text-[10px] leading-relaxed tracking-[0.14em] text-ink/40">
