@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Plot from "@/components/charts/Plot";
 import ScrambleText from "@/components/ui/ScrambleText";
@@ -142,6 +142,38 @@ export default function Wobble() {
   const [password, setPassword] = useState("");
   const [signing, setSigning] = useState(false);
   const [authError, setAuthError] = useState("");
+  /** Search across the whole notebook, not just the pages loaded so far. */
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Investigation[] | null>(null);
+  const [searching, setSearching] = useState<"idle" | "busy" | "error">("idle");
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latest = useRef("");
+
+  const search = (value: string) => {
+    setQuery(value);
+    setShown(PAGE);
+    if (pending.current) clearTimeout(pending.current);
+    const q = value.trim();
+    latest.current = q;
+    if (!q) {
+      setResults(null);
+      setSearching("idle");
+      return;
+    }
+    setSearching("busy");
+    pending.current = setTimeout(() => {
+      fetch(`/api/wobble/search?q=${encodeURIComponent(q)}`, { cache: "no-store" })
+        .then(async (res) => {
+          if (res.status === 401) return setAuth("out");
+          if (!res.ok) throw new Error(String(res.status));
+          const data = (await res.json()) as { investigations: Investigation[] };
+          if (latest.current !== q) return;
+          setResults(data.investigations);
+          setSearching("idle");
+        })
+        .catch(() => latest.current === q && setSearching("error"));
+    }, 300);
+  };
 
   const loadPage = useCallback((offset: number) => {
     setLoad("loading");
@@ -194,11 +226,12 @@ export default function Wobble() {
   const signOut = async () => {
     await fetch("/api/wobble/logout", { method: "POST" }).catch(() => {});
     setLog(null);
+    search("");
     setAuth("out");
   };
 
   const all = useMemo(() => log?.investigations ?? [], [log]);
-  const list = useMemo(() => all.filter((i) => matches(i, filter)), [all, filter]);
+  const list = useMemo(() => (results ?? all).filter((i) => matches(i, filter)), [results, all, filter]);
   const stats = useMemo(() => {
     const findings = all.flatMap((i) => i.findings);
     return {
@@ -300,7 +333,46 @@ export default function Wobble() {
           </section>
         </div>
 
-        <div className="mt-8 flex flex-wrap gap-2 border-b border-ink/10 pb-5">
+        <div className="mt-8 border-b border-ink/10 pb-5">
+          <label htmlFor="wobble-search" className="font-mono text-[10px] tracking-[0.2em] text-ink/45">
+            SEARCH THE NOTEBOOK
+          </label>
+          <div className="mt-2 flex max-w-xl items-center gap-2">
+            <input
+              id="wobble-search"
+              type="text"
+              enterKeyHint="search"
+              value={query}
+              onChange={(e) => search(e.target.value)}
+              placeholder="TOI-2992, TIC 1234, GAS GIANT, CANDIDATE…"
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full rounded-full border border-ink/25 bg-transparent px-4 py-2 font-mono text-[12px] tracking-[0.08em] text-ink placeholder:text-ink/30 focus:border-gold focus:outline-none"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => search("")}
+                className="shrink-0 rounded-full border border-ink/25 px-4 py-2 font-mono text-[10px] tracking-[0.16em] text-ink/70 hover:border-ink/60"
+              >
+                CLEAR
+              </button>
+            )}
+          </div>
+          <p className="mt-2 font-mono text-[10px] tracking-[0.14em] text-ink/40" aria-live="polite">
+            {!query.trim()
+              ? "FINDS ANY STAR WOBBLE HAS LOOKED AT: NAME, TIC OR TOI NUMBER, KNOWN PLANET, VERDICT OR WORLD TYPE."
+              : searching === "busy"
+                ? "SEARCHING…"
+                : searching === "error"
+                  ? "SEARCH DIDN'T GO THROUGH. TRY AGAIN."
+                  : results && results.length
+                    ? `${results.length}${results.length >= 60 ? "+" : ""} ${results.length === 1 ? "MATCH" : "MATCHES"} FOR “${query.trim().toUpperCase()}”`
+                    : `NO MATCHES FOR “${query.trim().toUpperCase()}”`}
+          </p>
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-2 border-b border-ink/10 pb-5">
           {FILTERS.map(([f, label]) => (
             <button
               key={f}
@@ -321,7 +393,7 @@ export default function Wobble() {
         {load === "loading" && <p className="mt-8 font-mono text-[11px] tracking-[0.16em] text-ink/55">OPENING THE NOTEBOOK…</p>}
         {load === "empty" && <p className="mt-8 font-mono text-[11px] tracking-[0.16em] text-ink/55">WOBBLE HASN&apos;T RUN YET. ITS FIRST INVESTIGATIONS WILL APPEAR HERE.</p>}
         {load === "error" && <p className="mt-8 font-mono text-[11px] tracking-[0.16em] text-ink/55">THE NOTEBOOK DIDN&apos;T OPEN. TRY AGAIN SHORTLY.</p>}
-        {load === "ready" && !list.length && <p className="mt-8 font-mono text-[11px] tracking-[0.16em] text-ink/55">NOTHING HERE YET.</p>}
+        {load === "ready" && !list.length && !(query.trim() && results && !results.length) && <p className="mt-8 font-mono text-[11px] tracking-[0.16em] text-ink/55">NOTHING HERE YET.</p>}
 
         <ol className="mt-8 grid gap-6 lg:grid-cols-2">
           {list.slice(0, shown).map((i) => (
@@ -361,7 +433,7 @@ export default function Wobble() {
           ))}
         </ol>
         <div className="mt-8 flex flex-wrap gap-3">
-          {(list.length > shown || (log && log.investigations.length < total)) && (
+          {(list.length > shown || (!results && log && log.investigations.length < total)) && (
             <button
               type="button"
               onClick={() => {
