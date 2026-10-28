@@ -19,6 +19,7 @@ import {
   type Curve,
   type Planet,
 } from "@/lib/exoplanets";
+import { DISPOSITIONS, MIN_SDE, MIN_SNR, verdict, type Toi } from "@/lib/verdict";
 import { planetScore, vetFeatures, type StarParams, type VetterModel } from "@/lib/vetter";
 import { describe, KIND_LABEL, radiusFromMass, transitForecast } from "@/lib/worlds";
 
@@ -37,15 +38,6 @@ interface Target {
   tic: string;
   label: string;
   host: string | null;
-}
-
-/** A TESS Object of Interest on the target star, with the follow-up team's verdict. */
-interface Toi {
-  toi: string;
-  disposition: string;
-  period: number | null;
-  depthPpm: number | null;
-  durationH: number | null;
 }
 
 /** An investigation kept in this browser's storage. */
@@ -75,14 +67,6 @@ function writeSaved(list: Saved[]) {
   }
 }
 
-const DISPOSITIONS: Record<string, string> = {
-  CP: "confirmed planet",
-  KP: "known planet",
-  PC: "planet candidate",
-  APC: "ambiguous planet candidate",
-  FP: "false positive",
-  FA: "false alarm",
-};
 
 /** One search's outcome: what was searched (after masking earlier signals), what was found, and the checks on it. */
 interface Signal {
@@ -97,9 +81,6 @@ const DIM = "rgba(236,238,242,0.35)";
 const LIST_LIMIT = 80;
 /** Sectors loaded at first; more can be added. */
 const FIRST_SECTORS = 3;
-/** Thresholds for calling a peak a detection (common in TESS searches). */
-const MIN_SDE = 9;
-const MIN_SNR = 7;
 /** Planets worth a first look, if the catalogue has them. */
 const SUGGESTED = ["WASP-18 b", "TOI-270 b", "LHS 3844 b", "TOI-700 d", "pi Men c"];
 
@@ -109,52 +90,6 @@ const tic = (s: string | null) => s?.replace(/^TIC\s*/i, "").trim() ?? "";
 
 const chip = (on: boolean) =>
   `rounded-full border px-3 py-1 font-mono text-[10px] tracking-[0.18em] transition-colors ${on ? "border-gold bg-gold text-void" : "border-ink/25 text-ink/70 hover:border-ink/60"}`;
-
-/** What a signal most likely is, by the checks this lab can run. Never "confirmed". */
-function verdict(s: Signal, known: Planet[], tois: Toi[] = [], starRadius: number | null = null) {
-  const r = s.result;
-  const c = s.checks;
-  if (!r || !c || r.sde < MIN_SDE || r.snr < MIN_SNR) {
-    return { kind: "none" as const, title: "NO SIGNIFICANT SIGNAL", notes: [`The strongest peak (SDE ${r ? r.sde.toFixed(1) : "—"}, SNR ${r ? r.snr.toFixed(1) : "—"}) is below the usual detection bar of SDE ${MIN_SDE} and SNR ${MIN_SNR}.`] };
-  }
-  for (const k of known) {
-    if (!k.period) continue;
-    const rel = relation(r.period, k.period);
-    if (rel === "same period") return { kind: "known" as const, title: `KNOWN PLANET RECOVERED · ${k.name.toUpperCase()}`, notes: [`Same period as ${k.name} (${k.period.toFixed(4)} d) in the NASA Exoplanet Archive.`] };
-    if (rel) return { kind: "alias" as const, title: `RELATED TO ${k.name.toUpperCase()}`, notes: [`At ${rel} of ${k.name}: most likely the same planet, seen at a multiple of its period.`] };
-  }
-  const notes: string[] = [];
-  const toi = tois.find((x) => x.period && relation(r.period, x.period) === "same period");
-  if (toi && (toi.disposition === "CP" || toi.disposition === "KP")) {
-    return { kind: "known" as const, title: `KNOWN PLANET RECOVERED · TOI-${toi.toi}`, notes: [`Same period as TOI-${toi.toi}, which the TESS follow-up team lists as a ${DISPOSITIONS[toi.disposition]}.`] };
-  }
-  if (toi && (toi.disposition === "FP" || toi.disposition === "FA")) notes.push(`The TESS follow-up team has already ruled this signal out: TOI-${toi.toi}, a ${DISPOSITIONS[toi.disposition]}.`);
-  const oe = Math.abs(c.odd.depth - c.even.depth) / Math.hypot(c.odd.err, c.even.err);
-  if (c.odd.n && c.even.n && oe > 3) notes.push("Odd and even transits differ in depth: the mark of an eclipsing binary star at half its true period.");
-  if (c.secondary.n && c.secondary.depth / c.secondary.err > 3) notes.push("A dip half an orbit later (a secondary eclipse): a glowing companion star, not a planet.");
-  if (r.depth > 0.03) notes.push("Over 3% deep: more likely a small star than a planet.");
-  if (c.shape.core > 0 && c.shape.edge < 0.5 * c.shape.core && (c.shape.core - c.shape.edge) / c.shape.err > 3)
-    notes.push("V-shaped rather than flat-bottomed: typical of two stars grazing each other.");
-  if (starRadius) {
-    const longest = longestTransit(r.period, starRadius);
-    if (r.duration > 1.5 * longest) notes.push(`Lasts ${r.duration.toFixed(1)} h, longer than a planet's transit can across this star (about ${longest.toFixed(1)} h at most).`);
-    if (Math.sqrt(r.depth) * starRadius * EARTH_PER_SUN > MAX_PLANET_RADIUS) notes.push("Too large for a planet: over twice Jupiter's size for this star.");
-  }
-  if (r.transits < 3) notes.push("Fewer than three transits: the period is uncertain.");
-  if (notes.length) return { kind: "doubt" as const, title: "SIGNAL · PROBABLY NOT A PLANET", notes };
-  if (toi) {
-    return {
-      kind: "toi" as const,
-      title: `ALREADY UNDER STUDY · TOI-${toi.toi}`,
-      notes: [`The TESS team flagged this same signal as TOI-${toi.toi}, now a ${DISPOSITIONS[toi.disposition] ?? (toi.disposition || "signal under review")}. Follow-up observations decide whether it is a planet.`],
-    };
-  }
-  return {
-    kind: "candidate" as const,
-    title: "STELLR CANDIDATE · UNVETTED",
-    notes: ["Passes the checks this lab runs, and matches no known planet of this star. That makes it a candidate, not a planet: confirming one needs follow-up this lab can't do yet (pixel-level checks for nearby stars, spectra of the star's wobble)."],
-  };
-}
 
 function Section({ step, title, children, aside }: { step: string; title: string; children: React.ReactNode; aside?: React.ReactNode }) {
   return (
@@ -307,6 +242,16 @@ export default function ExoplanetLab() {
       });
   }, []);
 
+  // Opened from Wobble or a shared link: /exoplanet-lab?tic=261136679&label=TOI-123.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const n = tic(params.get("tic"));
+    if (!/^\d{1,12}$/.test(n)) return;
+    const label = params.get("label")?.slice(0, 40) || `TIC ${n}`;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadTarget({ tic: n, label, host: null });
+  }, [loadTarget]);
+
   const analyse = (p: Planet) => {
     if (!p.tic) return;
     loadTarget({ tic: tic(p.tic), label: p.host, host: p.host });
@@ -380,26 +325,24 @@ export default function ExoplanetLab() {
   };
 
   const latest = signals[signals.length - 1] ?? null;
-  const judge = (s: Signal) => verdict(s, known, tois, starRadius);
-  const latestVerdict = latest ? judge(latest) : null;
-  const found = signals.filter((s) => s.result && judge(s).kind !== "none");
   const score = (s: Signal) => {
     if (!model || !s.result) return null;
     const x = vetFeatures(s.result.period, s.result.duration, s.result.depth, starParams);
     return x ? planetScore(model, x) : null;
   };
+  const judge = (s: Signal) => verdict(s, known, tois, starRadius, score(s));
+  const latestVerdict = latest ? judge(latest) : null;
+  const found = signals.filter((s) => s.result && judge(s).kind !== "none");
 
   // Chart layers.
   const curveLayers = useMemo<Layer[]>(() => (curve ? [{ kind: "points", x: curve.t, y: curve.f, color: INK, size: 1.5, alpha: 0.55 }] : []), [curve]);
-  const transitMarks = useMemo<Marker[]>(() => {
-    if (!curve || !found.length) return [];
-    const marks: Marker[] = [];
+  const transitMarks: Marker[] = [];
+  if (curve)
     for (const s of found) {
       const r = s.result!;
-      for (let tt = r.t0 - Math.ceil((r.t0 - curve.t[0]) / r.period) * r.period; tt <= curve.t[curve.t.length - 1]; tt += r.period) marks.push({ x: tt, color: "rgba(201,164,106,0.35)" });
+      for (let tt = r.t0 - Math.ceil((r.t0 - curve.t[0]) / r.period) * r.period; tt <= curve.t[curve.t.length - 1] && transitMarks.length < 400; tt += r.period)
+        transitMarks.push({ x: tt, color: "rgba(201,164,106,0.35)" });
     }
-    return marks.slice(0, 400);
-  }, [curve, found]);
 
   const periodogram = latest?.result ?? null;
   const pgLayers = useMemo<Layer[]>(() => {

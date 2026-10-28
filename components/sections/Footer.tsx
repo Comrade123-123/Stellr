@@ -8,14 +8,14 @@ const COLUMNS: { title: string; links: [string, string][] }[] = [
       ["ASTEROID SENTINEL", "/asteroid-sentinel"],
       ["SKY EVENTS", "/sky-events"],
       ["SPACE WEATHER", "/space-weather"],
-      ["COSMOSCOPE", "/cosmoscope"],
-      ["EXOPLANET LAB", "/exoplanet-lab"],
     ],
   },
   {
-    title: "COMING NEXT",
+    title: "EXPLORE & RESEARCH",
     links: [
-      ["WOBBLE", "#roadmap"],
+      ["COSMOSCOPE", "/cosmoscope"],
+      ["EXOPLANET LAB", "/exoplanet-lab"],
+      ["WOBBLE", "/wobble"],
     ],
   },
   {

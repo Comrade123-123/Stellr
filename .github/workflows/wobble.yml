@@ -1,0 +1,35 @@
+# Wobble, Stellr's research agent: once a day it picks TESS stars, investigates their light
+# curves with Exoplanet Lab's pipeline (scripts/wobble.ts) and commits what it found to
+# public/wobble/log.json, which the /wobble page shows. Also runs on demand.
+name: Wobble
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 2 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wobble
+  cancel-in-progress: false
+
+jobs:
+  investigate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npx --yes tsx@4.19.2 scripts/wobble.ts public/wobble/log.json
+      - name: Commit the log
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/wobble/log.json
+          if git diff --cached --quiet; then echo "No change"; exit 0; fi
+          git commit -m "Wobble: today's investigations"
+          for i in 1 2 3; do git pull --rebase -q && git push && break; sleep 5; done

@@ -14,7 +14,7 @@ const PHASES: { phase: string; name: string; body: string; status: string; live?
   { phase: "05", name: "Asteroid Sentinel", body: "Near-Earth objects on approach, plotted in 3D.", status: "LIVE", live: true, href: "/asteroid-sentinel" },
   { phase: "06", name: "Cosmoscope", body: "Explore the universe: fly between the planets, moons and spacecraft at their real positions.", status: "LIVE", live: true, href: "/cosmoscope" },
   { phase: "07", name: "Exoplanet Lab", body: "Research other worlds: search real TESS starlight for planets and weigh the evidence.", status: "LIVE", live: true, href: "/exoplanet-lab" },
-  { phase: "08", name: "Wobble", body: "Investigate the unknown: a research agent that runs and records investigations on its own.", status: "NEXT" },
+  { phase: "08", name: "Wobble", body: "Investigate the unknown: a research agent that searches TESS starlight every day and records what it finds.", status: "LIVE", live: true, href: "/wobble" },
 ];
 
 /** The road ahead, laid over the Milky Way seen from outside, the Sun marked on its arm. */
