@@ -80,3 +80,44 @@ export function describe(o: { radiusEarth: number; period: number; starRadius: n
     ratio: (o.radiusEarth / 109.1) / o.starRadius,
   };
 }
+
+/**
+ * Size from mass, for planets found without a transit (by their star's wobble, by imaging or
+ * by microlensing), after Chen & Kipping (2017, ApJ 834, 17), "Forecaster": a power law in
+ * three regimes, Terran (R ∝ M^0.279 below 2.04 M⊕), Neptunian (R ∝ M^0.589 up to 0.414 Jupiter
+ * masses) and Jovian (R ∝ M^−0.044, near Jupiter's size whatever the mass), each with its
+ * intrinsic scatter. Returns Earth radii with a one-sigma range.
+ */
+export function radiusFromMass(massEarth: number) {
+  const NEPTUNIAN = 2.04;
+  const JOVIAN = 131.6;
+  let r: number;
+  let scatter: number;
+  if (massEarth < NEPTUNIAN) {
+    r = 1.008 * Math.pow(massEarth, 0.279);
+    scatter = 0.04;
+  } else if (massEarth < JOVIAN) {
+    r = 1.008 * Math.pow(NEPTUNIAN, 0.279) * Math.pow(massEarth / NEPTUNIAN, 0.589);
+    scatter = 0.15;
+  } else {
+    const atJovian = 1.008 * Math.pow(NEPTUNIAN, 0.279) * Math.pow(JOVIAN / NEPTUNIAN, 0.589);
+    r = atJovian * Math.pow(massEarth / JOVIAN, -0.044);
+    scatter = 0.07;
+  }
+  return { radius: r, low: r * (1 - scatter), high: r * (1 + scatter) };
+}
+
+/**
+ * What a transit would look like if this orbit happened to line up with us: the chance that it
+ * does (the star's radius over the orbit's, for a randomly tilted circular orbit), how much the
+ * star would dim, and how long a central crossing would last.
+ */
+export function transitForecast(o: { radiusEarth: number; period: number; starRadius: number; starMass?: number | null }) {
+  const mass = o.starMass && o.starMass > 0 ? o.starMass : o.starRadius;
+  const au = orbitAu(o.period, mass);
+  const chance = Math.min(1, (o.starRadius * AU_PER_SUN_RADIUS) / au);
+  const depth = Math.pow(o.radiusEarth / 109.1 / o.starRadius, 2);
+  // Central crossing: the star's diameter over the orbital speed.
+  const hours = ((o.period * 24) / Math.PI) * Math.asin(Math.min(1, (o.starRadius * AU_PER_SUN_RADIUS) / au));
+  return { chance, depth, hours };
+}

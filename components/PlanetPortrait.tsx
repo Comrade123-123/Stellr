@@ -248,6 +248,7 @@ export default function PlanetPortrait({
   starMass = null,
   seed,
   compact = false,
+  sizeNote,
 }: {
   name: string;
   radiusEarth: number;
@@ -257,6 +258,8 @@ export default function PlanetPortrait({
   starMass?: number | null;
   seed: number;
   compact?: boolean;
+  /** How the size was found, when it wasn't measured from a transit. */
+  sizeNote?: string;
 }) {
   const world = useRef<HTMLCanvasElement>(null);
   const transit = useRef<HTMLCanvasElement>(null);
@@ -307,7 +310,7 @@ export default function PlanetPortrait({
         )}
       </div>
       <dl className={`mt-5 grid gap-4 ${compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4"}`}>
-        <Fact label="KIND" value={KIND_LABEL[d.kind].toUpperCase()} sub={`${radiusEarth.toFixed(1)} × EARTH'S SIZE`} />
+        <Fact label="KIND" value={KIND_LABEL[d.kind].toUpperCase()} sub={sizeNote ?? `${radiusEarth.toFixed(1)} × EARTH'S SIZE`} />
         <Fact label="ORBIT" value={`${d.au < 0.1 ? d.au.toFixed(3) : d.au.toFixed(2)} AU`} sub="× EARTH–SUN DISTANCE" />
         <Fact label="STARLIGHT" value={`${d.insolation < 10 ? d.insolation.toFixed(2) : Math.round(d.insolation).toLocaleString("en")} × EARTH'S`} />
         <Fact label="TEMPERATURE" value={temp} sub="IF IT REFLECTED 30% LIKE EARTH" />
@@ -315,7 +318,7 @@ export default function PlanetPortrait({
       </dl>
       <p className="caps mt-4 text-[11px] leading-relaxed text-ink/50">
         An illustration, not an image: no telescope can see this planet&apos;s surface. It shows the kind of world this size and warmth
-        suggest; the real colours, clouds and surface are unknown. The transit and the orbit are to scale.
+        suggest; the real colours, clouds and surface are unknown.{compact ? "" : " The transit and the orbit are to scale."}
         {d.inZone && d.kind !== "giant" ? " In the habitable zone means liquid water could exist on a suitable surface, not that it does." : ""}
       </p>
     </div>

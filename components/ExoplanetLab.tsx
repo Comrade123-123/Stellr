@@ -20,7 +20,7 @@ import {
   type Planet,
 } from "@/lib/exoplanets";
 import { planetScore, vetFeatures, type StarParams, type VetterModel } from "@/lib/vetter";
-import { describe, KIND_LABEL } from "@/lib/worlds";
+import { describe, KIND_LABEL, radiusFromMass, transitForecast } from "@/lib/worlds";
 
 type Load = "idle" | "loading" | "ready" | "error";
 type Method = "all" | "Transit" | "Radial Velocity" | "other";
@@ -637,24 +637,67 @@ export default function ExoplanetLab() {
                 <p className="mt-1 font-mono text-[10px] tracking-[0.14em] text-ink/45">ORBITS {picked.host.toUpperCase()}{picked.facility ? ` · FOUND BY ${picked.facility.toUpperCase()}` : ""}</p>
                 <dl className="mt-4 grid grid-cols-2 gap-4">
                   <Fact label="ONE ORBIT" value={fmtNum(picked.period, picked.period && picked.period < 10 ? 3 : 1, " DAYS")} />
-                  <Fact label="SIZE" value={fmtNum(picked.radius, 2, " × EARTH")} sub="RADIUS" />
+                  <Fact label="SIZE" value={fmtNum(picked.radius, 2, " × EARTH")} sub={picked.method === "Transit" ? "RADIUS" : picked.radius ? "ESTIMATED, NOT MEASURED" : "UNKNOWN: NO TRANSIT"} />
                   <Fact label="MASS" value={fmtNum(picked.mass, 1, " × EARTH")} />
                   <Fact label="TEMPERATURE" value={picked.temp ? `${Math.round(picked.temp - 273)} °C` : "—"} sub="IF IT WERE A BARE ROCK" />
                   <Fact label="DISTANCE" value={fmtNum(picked.distance ? picked.distance * 3.2616 : null, 1, " LIGHT-YEARS")} />
                   <Fact label="ITS STAR" value={picked.starTemp ? `${Math.round(picked.starTemp).toLocaleString("en")} K` : "—"} sub={picked.starRadius ? `${picked.starRadius} × THE SUN'S SIZE` : undefined} />
                 </dl>
-                {picked.radius && picked.period && picked.starRadius && picked.starTemp && (
-                  <div className="mt-5 border-t border-ink/10 pt-5">
-                    <PlanetPortrait compact name={picked.name} radiusEarth={picked.radius} period={picked.period} starRadius={picked.starRadius} starTeff={picked.starTemp} seed={Math.round(picked.period * 1000)} />
-                  </div>
-                )}
+                {(() => {
+                  // No transit, no measured size: forecast it from the mass, and what a transit would look like.
+                  const est = !picked.radius && picked.mass ? radiusFromMass(picked.mass) : null;
+                  const size = picked.radius ?? est?.radius ?? null;
+                  if (!size || !picked.period || !picked.starRadius || !picked.starTemp) return null;
+                  const forecast = picked.method !== "Transit" ? transitForecast({ radiusEarth: size, period: picked.period, starRadius: picked.starRadius }) : null;
+                  return (
+                    <div className="mt-5 border-t border-ink/10 pt-5">
+                      {picked.method !== "Transit" && (
+                        <p className="mb-4 font-mono text-[10px] leading-relaxed tracking-[0.14em] text-gold">
+                          NO TRANSIT, SO NO MEASURED SIZE ·{" "}
+                          {est
+                            ? `PREDICTED FROM ITS MASS: ≈ ${est.radius.toFixed(1)} × EARTH (${est.low.toFixed(1)}–${est.high.toFixed(1)})`
+                            : "THE ARCHIVE'S SIZE IS ITSELF AN ESTIMATE FROM ITS MASS"}
+                          {picked.method === "Radial Velocity" ? " · ITS MASS IS A MINIMUM, SO IT MAY BE LARGER" : ""}
+                        </p>
+                      )}
+                      <PlanetPortrait
+                        compact
+                        name={picked.name}
+                        radiusEarth={size}
+                        period={picked.period}
+                        starRadius={picked.starRadius}
+                        starTeff={picked.starTemp}
+                        seed={Math.round(picked.period * 1000)}
+                        sizeNote={picked.method !== "Transit" ? "SIZE ESTIMATED FROM MASS" : undefined}
+                      />
+                      {forecast && (
+                        <div className="mt-5 border-t border-ink/10 pt-4">
+                          <p className="font-mono text-[10px] tracking-[0.2em] text-ink/50">IF ITS ORBIT LINES UP WITH US</p>
+                          <dl className="mt-3 grid grid-cols-2 gap-4">
+                            <Fact label="CHANCE" value={forecast.chance < 0.01 ? `${(forecast.chance * 100).toFixed(2)}%` : `${(forecast.chance * 100).toFixed(1)}%`} sub="THAT IT TRANSITS" />
+                            <Fact label="DIMMING" value={depthText(forecast.depth)} sub="OF ITS STAR" />
+                            <Fact label="LASTING" value={`UP TO ${forecast.hours.toFixed(1)} H`} />
+                            <Fact label="EVERY" value={fmtNum(picked.period, picked.period < 10 ? 2 : 0, " DAYS")} />
+                          </dl>
+                          <p className="caps mt-3 text-[11px] leading-relaxed text-ink/50">
+                            {picked.period > 200
+                              ? "Its orbit is longer than TESS usually watches a star, so even a transit would be hard to catch."
+                              : forecast.chance < 0.02
+                                ? "Unlikely, but worth a look: a transit would give its true size."
+                                : "Worth a look: a transit would give its true size."}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {picked.tic ? (
                   <button
                     type="button"
                     onClick={() => analyse(picked)}
                     className="mt-5 rounded-full bg-ink px-5 py-2.5 font-mono text-[11px] font-semibold tracking-[0.12em] text-void transition-colors hover:bg-gold"
                   >
-                    ANALYSE ITS STAR&apos;S LIGHT →
+                    {picked.method === "Transit" ? "ANALYSE ITS STAR'S LIGHT →" : "LOOK FOR IT IN TESS DATA →"}
                   </button>
                 ) : (
                   <p className="caps mt-4 text-[11px] text-ink/50">No TESS catalogue number for this star, so no light curve to analyse here.</p>
