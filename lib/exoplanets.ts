@@ -331,7 +331,36 @@ export function measure(curve: Curve, period: number, t0: number, durationH: num
     secondary: { depth: base - avg(opposite), err: err(opposite.length), n: opposite.length },
     /** The middle half of the transit against its outer half: a flat-bottomed (U) dip has them alike; a V-shaped one, typical of grazing eclipsing stars, is much shallower at the edges. */
     shape: { core: base - avg(core), edge: base - avg(edge), err: Math.hypot(err(core.length), err(edge.length)) },
+    variability: variability(curve, period, t0, half, sigma),
   };
+}
+
+/**
+ * How much the star brightens and dims on the same period away from the dip: the light curve
+ * outside the transit folded into 24 phase bins, the spread of their averages, and the noise
+ * such a spread would show by chance. Spots, pulsation and close binaries vary smoothly all
+ * the way round; a transiting planet leaves the rest flat.
+ */
+function variability(curve: Curve, period: number, t0: number, half: number, sigma: number) {
+  const BINS = 24;
+  const sum = new Float64Array(BINS);
+  const n = new Float64Array(BINS);
+  for (let i = 0; i < curve.t.length; i++) {
+    const dt = fromTransit(curve.t[i], period, t0);
+    if (Math.abs(dt) < half * 1.5) continue;
+    const b = Math.min(BINS - 1, Math.floor(((dt / period + 0.5) % 1) * BINS));
+    sum[b] += curve.f[i];
+    n[b]++;
+  }
+  const means: number[] = [];
+  let fewest = Infinity;
+  for (let b = 0; b < BINS; b++)
+    if (n[b] >= 5) {
+      means.push(sum[b] / n[b]);
+      fewest = Math.min(fewest, n[b]);
+    }
+  if (means.length < 6) return { amplitude: 0, noise: Infinity };
+  return { amplitude: Math.max(...means) - Math.min(...means), noise: (4 * sigma) / Math.sqrt(fewest) };
 }
 
 export type Checks = ReturnType<typeof measure>;

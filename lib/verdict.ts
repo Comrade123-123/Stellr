@@ -61,6 +61,8 @@ export function verdict(s: { result: BlsResult | null; checks: Checks | null }, 
     if (r.duration > 1.5 * longest) notes.push(`Lasts ${r.duration.toFixed(1)} h, longer than a planet's transit can across this star (about ${longest.toFixed(1)} h at most).`);
     if (Math.sqrt(r.depth) * starRadius * EARTH_PER_SUN > MAX_PLANET_RADIUS) notes.push("Too large for a planet: over twice Jupiter's size for this star.");
   }
+  if (c.variability.amplitude > Math.max(0.5 * r.depth, c.variability.noise))
+    notes.push("The star brightens and dims on this same period away from the dip too: more like spots, pulsation or a close binary star than a transit.");
   if (r.transits < 3) notes.push("Fewer than three transits: the period is uncertain.");
   if (notes.length) return { kind: "doubt" as const, title: "SIGNAL · PROBABLY NOT A PLANET", notes };
   if (toi) {

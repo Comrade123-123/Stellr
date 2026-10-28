@@ -956,6 +956,11 @@ export default function ExoplanetLab() {
                         `edges ${depthText(Math.max(c.shape.edge, 0))} vs middle ${depthText(Math.max(c.shape.core, 0))}`,
                       ],
                     ];
+                    rows.push([
+                      !(c.variability.amplitude > Math.max(0.5 * latest.result!.depth, c.variability.noise)),
+                      "FLAT AWAY FROM THE DIP",
+                      `${depthText(c.variability.amplitude)} swing around the orbit`,
+                    ]);
                     const R = starRadius;
                     if (R) {
                       const longest = longestTransit(latest.result!.period, R);

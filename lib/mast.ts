@@ -52,7 +52,8 @@ export async function tessSectors(tic: string): Promise<Sector[]> {
   const best = new Map<number, Record<string, unknown>>();
   for (const r of rows) {
     const sector = Number(r.sequence_number);
-    if (!Number.isFinite(sector) || rank(r) > 3) continue;
+    // Multi-sector validation reports (an obs_id spanning sectors, e.g. "-s0014-s0086-") carry no light curve.
+    if (!Number.isFinite(sector) || rank(r) > 3 || /-s\d{4}-s\d{4}-/.test(String(r.obs_id ?? ""))) continue;
     const have = best.get(sector);
     if (!have || rank(r) < rank(have)) best.set(sector, r);
   }

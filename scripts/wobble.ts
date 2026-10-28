@@ -19,7 +19,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { bls, flatten, fromTransit, mask, measure, EARTH_PER_SUN, type Curve } from "../lib/exoplanets";
+import { bls, flatten, fromTransit, mask, measure, relation, EARTH_PER_SUN, type Curve } from "../lib/exoplanets";
 import { lightCurveFromFits } from "../lib/lightcurve";
 import { invoke, lightCurveFile, tessSectors, ticStar, type TicStar } from "../lib/mast";
 import { verdict, type Toi } from "../lib/verdict";
@@ -186,6 +186,8 @@ async function investigate(tic: string, label: string, reason: Investigation["re
       const x = result && model ? vetFeatures(result.period, result.duration, result.depth, star ? { radius: star.radius, teff: star.teff, logg: star.logg } : null) : null;
       const score = model && x ? planetScore(model, x) : null;
       const v = verdict({ result, checks }, known, tois, star?.radius ?? null, score);
+      // The same period (or a simple multiple) again means masking didn't remove it: a smooth variation, not new dips.
+      if (result && record.findings.some((f) => relation(result.period, f.period))) break;
       if (v.kind === "none" || !result) {
         if (round_ === 0) record.quiet = result ? { sde: round(result.sde, 1), snr: round(result.snr, 1) } : null;
         break;
