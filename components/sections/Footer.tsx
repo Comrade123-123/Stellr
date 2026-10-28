@@ -15,7 +15,7 @@ const COLUMNS: { title: string; links: [string, string][] }[] = [
   {
     title: "COMING NEXT",
     links: [
-      ["ANVESHAK", "#roadmap"],
+      ["WOBBLE", "#roadmap"],
     ],
   },
   {

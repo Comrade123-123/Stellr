@@ -587,7 +587,7 @@ export default function ExoplanetLab() {
               <div className="mt-3 flex flex-wrap gap-2">
                 {(["all", "Transit", "Radial Velocity", "other"] as Method[]).map((m) => (
                   <button key={m} type="button" onClick={() => setMethod(m)} className={chip(method === m)}>
-                    {m === "all" ? "ALL" : m === "Radial Velocity" ? "WOBBLE" : m.toUpperCase()}
+                    {m === "all" ? "ALL" : m === "Radial Velocity" ? "RADIAL VELOCITY" : m.toUpperCase()}
                   </button>
                 ))}
               </div>
