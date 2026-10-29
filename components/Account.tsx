@@ -123,7 +123,14 @@ export default function Account() {
                   Continue with Google
                 </a>
                 <p className="mt-4 font-mono text-[9px] leading-relaxed tracking-[0.12em] text-ink/40">
-                  STELLR KEEPS YOUR NAME, EMAIL AND PICTURE FROM GOOGLE, NOTHING ELSE. DELETE THE ACCOUNT ANY TIME.
+                  STELLR KEEPS YOUR NAME, EMAIL AND PICTURE FROM GOOGLE, NOTHING ELSE. DELETE THE ACCOUNT ANY TIME.{" "}
+                  <Link href="/privacy" className="text-ink/70 underline underline-offset-2 hover:text-gold">
+                    PRIVACY
+                  </Link>{" "}
+                  ·{" "}
+                  <Link href="/terms" className="text-ink/70 underline underline-offset-2 hover:text-gold">
+                    TERMS
+                  </Link>
                 </p>
               </>
             )}

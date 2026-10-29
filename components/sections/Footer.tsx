@@ -23,6 +23,9 @@ const COLUMNS: { title: string; links: [string, string][] }[] = [
     links: [
       ["ROADMAP", "#roadmap"],
       ["START EXPLORING", "#start"],
+      ["ACCOUNT", "/account"],
+      ["PRIVACY", "/privacy"],
+      ["TERMS", "/terms"],
       ["BACK TO TOP", "#top"],
     ],
   },
