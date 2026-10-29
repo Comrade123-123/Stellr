@@ -83,6 +83,8 @@ export default function CosmoscopeTool() {
   const [reverse, setReverse] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [trueScale, setTrueScale] = useState(false);
+  /** Panels hidden: nothing on screen but the solar system. */
+  const [clean, setClean] = useState(false);
   const [look, setLook] = useState<Look | null>(null);
   /** JPL Horizons paths: spacecraft by name, and "Titan". */
   const [tracks, setTracks] = useState<Map<string, Track>>(() => new Map());
@@ -105,6 +107,18 @@ export default function CosmoscopeTool() {
     read();
     const id = setInterval(read, 250);
     return () => clearInterval(id);
+  }, []);
+
+  // H hides or shows the panels; Esc brings them back. Not while typing in a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (e.metaKey || e.ctrlKey || e.altKey || el?.closest("input, textarea, select, [contenteditable]")) return;
+      if (e.key === "h" || e.key === "H") setClean((c) => !c);
+      else if (e.key === "Escape") setClean(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const setRate = (rate: number, back = reverse) => {
@@ -264,9 +278,11 @@ export default function CosmoscopeTool() {
   const tz = place?.timeZone;
   const isTonight = shown ? fmt(shown, { day: "2-digit", month: "short", year: "numeric" }, tz) === fmt(opened, { day: "2-digit", month: "short", year: "numeric" }, tz) : true;
 
+  const hide = clean ? "hidden" : "";
+
   return (
-    <main className="relative min-h-svh bg-void text-ink lg:h-svh lg:overflow-hidden">
-      <div className="relative h-[58svh] w-full lg:absolute lg:inset-0 lg:h-full">
+    <main className={`relative min-h-svh bg-void text-ink lg:h-svh lg:overflow-hidden ${clean ? "h-svh overflow-hidden" : ""}`}>
+      <div className={`relative w-full lg:absolute lg:inset-0 lg:h-full ${clean ? "h-svh" : "h-[58svh]"}`}>
         <Scene
           clock={clock}
           selected={selected}
@@ -283,11 +299,11 @@ export default function CosmoscopeTool() {
       {/* A soft shade behind the title, so it stays readable when a planet drifts behind it. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute left-0 top-0 hidden h-[340px] w-[680px] sm:block"
+        className={`pointer-events-none absolute left-0 top-0 hidden h-[340px] w-[680px] ${clean ? "" : "sm:block"}`}
         style={{ background: "radial-gradient(ellipse at 0% 0%, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.45) 45%, transparent 72%)" }}
       />
       <header className="pointer-events-none absolute inset-x-0 top-0 flex flex-wrap items-start justify-between gap-4 p-5 sm:flex-nowrap sm:p-8">
-        <div className="pointer-events-auto">
+        <div className={`pointer-events-auto ${hide}`}>
           <Link href="/" className="font-mono text-[11px] tracking-[0.2em] text-ink/60 transition-colors hover:text-gold">
             <ScrambleText text="← STELLR" />
           </Link>
@@ -295,13 +311,22 @@ export default function CosmoscopeTool() {
           <p className="caps mt-2 max-w-[34ch] text-[11px] text-ink/60 sm:text-[12px]">Every planet, moon and spacecraft, where it really is.</p>
           <p className="mt-3 hidden font-mono text-[10px] tracking-[0.18em] text-ink/40 lg:block">CLICK A NAME TO FLY THERE · DRAG TO TURN · SCROLL TO ZOOM</p>
         </div>
-        <div className="pointer-events-auto flex flex-wrap gap-2 sm:max-w-[60%] sm:justify-end">
+        <div className={`pointer-events-auto flex flex-wrap gap-2 sm:max-w-[60%] sm:justify-end ${clean ? "ml-auto" : ""}`}>
+          <button
+            type="button"
+            aria-pressed={clean}
+            title={clean ? "Bring back the panels (H or Esc)" : "Hide the panels and see only the solar system (H)"}
+            onClick={() => setClean(!clean)}
+            className={chip(clean)}
+          >
+            {clean ? "SHOW PANELS" : "HIDE PANELS"}
+          </button>
           <button
             type="button"
             aria-pressed={trueScale}
             title="Show distances and sizes in their true proportions"
             onClick={() => setTrueScale(!trueScale)}
-            className={chip(trueScale)}
+            className={`${chip(trueScale)} ${hide}`}
           >
             TRUE SCALE
           </button>
@@ -310,7 +335,7 @@ export default function CosmoscopeTool() {
             aria-pressed={hazard === "on"}
             title="Show every known potentially hazardous asteroid"
             onClick={toggleHazard}
-            className={chip(hazard === "on", "border-[#ff6a3d] bg-[#ff6a3d] text-void")}
+            className={`${chip(hazard === "on", "border-[#ff6a3d] bg-[#ff6a3d] text-void")} ${hide}`}
           >
             {hazard === "loading" ? "HAZARDOUS…" : "HAZARDOUS"}
           </button>
@@ -320,7 +345,7 @@ export default function CosmoscopeTool() {
       {/* Time controls: over the scene on wide screens, under it on phones. */}
       <section
         aria-label="Time"
-        className="relative z-10 px-5 pt-4 sm:px-8 lg:absolute lg:bottom-8 lg:left-8 lg:right-[436px] lg:p-0"
+        className={`relative z-10 px-5 pt-4 sm:px-8 lg:absolute lg:bottom-8 lg:left-8 lg:right-[436px] lg:p-0 ${hide}`}
       >
         <div className="frame bg-void/70 p-4 backdrop-blur-md">
           <p className="font-mono text-[9px] tracking-[0.2em] text-ink/40">THE MOMENT SHOWN</p>
@@ -430,7 +455,7 @@ export default function CosmoscopeTool() {
         </div>
       </section>
 
-      <aside className="relative z-10 px-5 pb-10 pt-4 sm:px-8 lg:absolute lg:bottom-8 lg:right-8 lg:top-28 lg:w-[388px] lg:overflow-y-auto lg:overflow-x-hidden lg:p-[4px]">
+      <aside className={`relative z-10 px-5 pb-10 pt-4 sm:px-8 lg:absolute lg:bottom-8 lg:right-8 lg:top-28 lg:w-[388px] lg:overflow-y-auto lg:overflow-x-hidden lg:p-[4px] ${hide}`}>
         <div className="frame bg-void/70 backdrop-blur-md">
           {info && dist ? (
             <div className="p-5">
@@ -755,6 +780,13 @@ export default function CosmoscopeTool() {
           </p>
         </div>
       </aside>
+
+      {clean && (
+        <p className="pointer-events-none absolute inset-x-0 bottom-5 text-center font-mono text-[10px] tracking-[0.2em] text-ink/40">
+          {shown ? `${fmt(shown, { day: "2-digit", month: "short", year: "numeric" }, "UTC")} · ` : ""}DRAG TO TURN · SCROLL TO ZOOM · <span className="hidden sm:inline">H OR ESC</span>
+          <span className="sm:hidden">TAP SHOW PANELS</span> TO BRING THE PANELS BACK
+        </p>
+      )}
     </main>
   );
 }
