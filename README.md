@@ -1,5 +1,19 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Accounts (sign in with Google)
+
+`/account` signs people in with Google; accounts live in the same Upstash Redis (`user:<google id>`).
+Every tool works without signing in.
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → **OAuth consent screen**:
+   External, app name Stellr, your email; publish it.
+2. **Credentials** → Create credentials → **OAuth client ID** → Web application. Authorised redirect URI:
+   `https://<your domain>/api/auth/google/callback` (for example `https://stellr-coral.vercel.app/api/auth/google/callback`).
+3. Vercel → Settings → Environment Variables: `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
+   (optionally `AUTH_SECRET`, a long random string that signs sessions). Redeploy.
+
+Until both Google variables are set, `/account` says sign-in isn't switched on yet.
+
 ## Waitlist (closed)
 
 Every tool is open, so the landing page no longer collects emails. Sign-ups made earlier are still

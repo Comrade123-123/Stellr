@@ -34,6 +34,15 @@ export default function Header() {
     return () => gsap.ticker.remove(tick);
   }, []);
 
+  /** The signed-in account, if any; the header shows its picture. */
+  const [me, setMe] = useState<{ name: string; picture: string } | null>(null);
+  useEffect(() => {
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((d: { user: { name: string; picture: string } | null } | null) => setMe(d?.user ?? null))
+      .catch(() => {});
+  }, []);
+
   const label = labels[current] ?? "";
 
   return (
@@ -65,7 +74,23 @@ export default function Header() {
           </span>
         </a>
 
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-2 sm:gap-3">
+          <a
+            href="/account"
+            aria-label={me ? `Your account, ${me.name}` : "Sign in"}
+            className="flex items-center gap-2 whitespace-nowrap rounded-full border border-ink/25 p-1 text-[11px] font-semibold tracking-[0.12em] text-ink/85 transition-colors hover:border-ink sm:pr-4"
+          >
+            {me?.picture ? (
+              // Google's avatar host; a plain img keeps it out of the image optimiser.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={me.picture} alt="" referrerPolicy="no-referrer" className="h-7 w-7 rounded-full" />
+            ) : (
+              <span className="flex h-7 w-7 items-center justify-center rounded-full border border-ink/25 font-mono text-[11px] text-gold">
+                {me ? me.name.slice(0, 1).toUpperCase() : "→"}
+              </span>
+            )}
+            <span className="hidden sm:inline">{me ? "ACCOUNT" : "SIGN IN"}</span>
+          </a>
           <a
             href="#tools"
             className="rounded-full border border-ink/40 px-4 py-2 text-[11px] font-semibold tracking-[0.12em] text-ink transition-colors hover:border-ink hover:bg-ink hover:text-void sm:px-5"
