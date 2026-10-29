@@ -17,6 +17,7 @@ export const SESSION_DAYS = 30;
 // Overridable only so tests can stand in for Google.
 const AUTH_URL = process.env.GOOGLE_AUTH_URL ?? "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = process.env.GOOGLE_TOKEN_URL ?? "https://oauth2.googleapis.com/token";
+const USERINFO_URL = process.env.GOOGLE_USERINFO_URL ?? "https://openidconnect.googleapis.com/v1/userinfo";
 const ISSUERS = ["accounts.google.com", "https://accounts.google.com"];
 
 function google() {
@@ -120,12 +121,19 @@ export async function finishSignIn(origin: string, code: string, verifier: strin
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`token endpoint ${res.status}`);
-  const { id_token } = (await res.json()) as { id_token?: string };
+  const { id_token, access_token } = (await res.json()) as { id_token?: string; access_token?: string };
   const claims = JSON.parse(Buffer.from(id_token?.split(".")[1] ?? "", "base64url").toString() || "{}") as Record<string, unknown>;
   if (!ISSUERS.includes(String(claims.iss)) || claims.aud !== g.id || !(Number(claims.exp) * 1000 > Date.now()) || typeof claims.sub !== "string") {
     throw new Error("ID token failed its checks");
   }
   if (claims.email_verified !== true || typeof claims.email !== "string") throw new Error("unverified email");
+  // The ID token doesn't always carry the picture; Google's userinfo endpoint does.
+  if (typeof claims.picture !== "string" && access_token) {
+    const info = await fetch(USERINFO_URL, { headers: { Authorization: `Bearer ${access_token}` }, cache: "no-store" })
+      .then((r) => (r.ok ? (r.json() as Promise<{ sub?: string; picture?: string }>) : null))
+      .catch(() => null);
+    if (info?.sub === claims.sub && typeof info.picture === "string") claims.picture = info.picture;
+  }
   return {
     id: claims.sub,
     email: claims.email,

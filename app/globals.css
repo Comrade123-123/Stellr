@@ -127,7 +127,32 @@ html.lenis body {
   to { transform: scale(1.07) translate3d(-1%, -1%, 0); }
 }
 
+/* Account page: a quiet CSS starfield and an orbit around the avatar. No WebGL. */
+.starfield {
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, rgb(236 238 242 / 0.7), transparent 60%),
+    radial-gradient(1px 1px at 27% 72%, rgb(236 238 242 / 0.5), transparent 60%),
+    radial-gradient(1.5px 1.5px at 41% 33%, rgb(236 238 242 / 0.8), transparent 60%),
+    radial-gradient(1px 1px at 58% 84%, rgb(236 238 242 / 0.45), transparent 60%),
+    radial-gradient(1px 1px at 66% 12%, rgb(236 238 242 / 0.6), transparent 60%),
+    radial-gradient(1.5px 1.5px at 79% 46%, rgb(201 164 106 / 0.8), transparent 60%),
+    radial-gradient(1px 1px at 88% 78%, rgb(236 238 242 / 0.5), transparent 60%),
+    radial-gradient(1px 1px at 94% 24%, rgb(236 238 242 / 0.65), transparent 60%),
+    radial-gradient(1px 1px at 6% 56%, rgb(236 238 242 / 0.4), transparent 60%),
+    radial-gradient(1px 1px at 50% 55%, rgb(236 238 242 / 0.35), transparent 60%);
+  background-size: 420px 420px;
+}
+
+.orbit-spin {
+  animation: orbit-spin 28s linear infinite;
+}
+
+@keyframes orbit-spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .orbit-spin,
   .scroll-cue,
   .live-dot,
   .fallback-drift {

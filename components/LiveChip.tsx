@@ -7,7 +7,7 @@ import { formatUtc, useNow } from "@/lib/time";
 import { useAppStore } from "@/lib/store";
 
 /** Anything the chip shouldn't sit on top of. */
-const CONTENT = "a, button, input, p, h2, h3, li";
+const CONTENT = "a, button, input, p, h2, h3, li, footer";
 
 /**
  * Floating picture-in-picture style readout (after Oakley's pinned video
