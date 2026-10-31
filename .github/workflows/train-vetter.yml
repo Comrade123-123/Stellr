@@ -1,4 +1,4 @@
-# Trains Exoplanet Lab's transit vetter on NASA's Kepler signals and commits the model
+# Trains Exoplanet Lab's transit vetter on NASA's labelled Kepler and TESS signals and commits the model
 # (public/models/vetter.json). Runs on demand and once a month, as the archive's labels grow.
 name: Train exoplanet vetter
 
