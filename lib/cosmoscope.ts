@@ -288,19 +288,78 @@ export function moonDistance(moon: MoonInfo) {
   return parent.radius * (1 + 0.85 * Math.sqrt(ratio));
 }
 
+/** A moment on a mission: a planet flyby (drawn where that planet was) or a milestone (drawn where the craft was). */
+export interface CraftEvent {
+  label: string;
+  /** UTC date, YYYY-MM-DD. */
+  date: string;
+  /** The planet passed, if it was a flyby. */
+  body?: BodyName;
+}
+
 export interface CraftInfo {
   /** JPL Horizons ID. */
   id: string;
   name: string;
   launched: string;
   note: string;
+  /** Which way its main dish or shield faces. */
+  faces: "earth" | "sun";
+  events: CraftEvent[];
 }
 
+/** Flyby dates are the closest approaches, from NASA's mission pages. */
 export const CRAFT: CraftInfo[] = [
-  { id: "-31", name: "Voyager 1", launched: "1977-09-05", note: "The farthest object humans have built. In interstellar space since 2012, still sending data." },
-  { id: "-32", name: "Voyager 2", launched: "1977-08-20", note: "The only spacecraft to visit Uranus and Neptune. In interstellar space since 2018." },
-  { id: "-98", name: "New Horizons", launched: "2006-01-19", note: "Flew past Pluto in 2015 and Arrokoth, the most distant world ever visited, in 2019." },
-  { id: "-96", name: "Parker Solar Probe", launched: "2018-08-12", note: "The fastest and closest to the Sun of anything ever built: 6.1 million km from its surface in December 2024." },
+  {
+    id: "-31",
+    name: "Voyager 1",
+    launched: "1977-09-05",
+    note: "The farthest object humans have built. In interstellar space since 2012, still sending data.",
+    faces: "earth",
+    events: [
+      { label: "Jupiter", date: "1979-03-05", body: "Jupiter" },
+      { label: "Saturn", date: "1980-11-12", body: "Saturn" },
+      { label: "Termination shock", date: "2004-12-16" },
+      { label: "Interstellar space", date: "2012-08-25" },
+    ],
+  },
+  {
+    id: "-32",
+    name: "Voyager 2",
+    launched: "1977-08-20",
+    note: "The only spacecraft to visit Uranus and Neptune. In interstellar space since 2018.",
+    faces: "earth",
+    events: [
+      { label: "Jupiter", date: "1979-07-09", body: "Jupiter" },
+      { label: "Saturn", date: "1981-08-25", body: "Saturn" },
+      { label: "Uranus", date: "1986-01-24", body: "Uranus" },
+      { label: "Neptune", date: "1989-08-25", body: "Neptune" },
+      { label: "Interstellar space", date: "2018-11-05" },
+    ],
+  },
+  {
+    id: "-98",
+    name: "New Horizons",
+    launched: "2006-01-19",
+    note: "Flew past Pluto in 2015 and Arrokoth, the most distant world ever visited, in 2019.",
+    faces: "earth",
+    events: [
+      { label: "Jupiter", date: "2007-02-28", body: "Jupiter" },
+      { label: "Pluto", date: "2015-07-14", body: "Pluto" },
+      { label: "Arrokoth", date: "2019-01-01" },
+    ],
+  },
+  {
+    id: "-96",
+    name: "Parker Solar Probe",
+    launched: "2018-08-12",
+    note: "The fastest and closest to the Sun of anything ever built: 6.1 million km from its surface in December 2024.",
+    faces: "sun",
+    events: [
+      { label: "Venus", date: "2018-10-03", body: "Venus" },
+      { label: "Closest to the Sun", date: "2024-12-24" },
+    ],
+  },
 ];
 
 /** Positions from JPL Horizons: Julian dates and ecliptic vectors (AU), 4 numbers per sample, in time order. */

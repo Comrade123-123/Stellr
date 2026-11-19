@@ -29,6 +29,7 @@ import { getQuality } from "@/lib/quality";
 import type { Swarm } from "./AsteroidScene";
 import { Stars } from "./OrbitScene";
 import { RING_VERTEX } from "./cosmoscope/glsl";
+import CraftModel from "./cosmoscope/CraftModel";
 import { AIR, THIN_RINGS, airMaterial, cloudMaterial, moonMaterial, onGlobe, planetMaterial, plateLines, potatoGeometry, thinRing, type Common } from "./cosmoscope/materials";
 
 /*
@@ -51,7 +52,7 @@ export interface Clock {
 
 /** A particular view of the chosen body; `n` makes a repeat request a new one. */
 export interface Look {
-  kind: "storm" | "rings" | "north" | "south" | "plates";
+  kind: "storm" | "rings" | "north" | "south" | "plates" | "journey" | "close";
   n: number;
 }
 
@@ -90,6 +91,8 @@ interface Shared {
   date: Date;
   /** North poles (scene axes) of the bodies. */
   axes: Map<string, THREE.Vector3>;
+  /** Each spacecraft's path so far, as a bounding sphere in scene units, for framing it whole. */
+  paths: Map<string, THREE.Sphere>;
 }
 
 const coronaFragment = /* glsl */ `
@@ -102,10 +105,11 @@ const coronaFragment = /* glsl */ `
 `;
 const glowFragment = /* glsl */ `
   uniform vec3 uColor;
+  uniform float uAlpha;
   varying vec2 vUv;
   void main() {
     float r = length(vUv - 0.5) * 2.0;
-    float a = exp(-r * r * 6.0) + exp(-r * 18.0) * 2.0;
+    float a = (exp(-r * r * 6.0) + exp(-r * 18.0) * 2.0) * uAlpha;
     gl_FragColor = vec4(uColor * a, a);
   }
 `;
@@ -174,11 +178,11 @@ function SurfaceLabel({ at, text, tone = "text-gold", track }: { at: [number, nu
  * close the camera comes (`size` is a fraction of the distance to it), so a spacecraft stays a
  * point of light rather than swelling to fill the screen.
  */
-function Glow({ color, size, overlay = false }: { color: THREE.Color; size: number; overlay?: boolean }) {
+function Glow({ color, size, overlay = false, fadeNear = 0 }: { color: THREE.Color; size: number; overlay?: boolean; fadeNear?: number }) {
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
-        uniforms: { uColor: { value: color } },
+        uniforms: { uColor: { value: color }, uAlpha: { value: 1 } },
         vertexShader: quadVertex,
         fragmentShader: glowFragment,
         transparent: true,
@@ -195,7 +199,10 @@ function Glow({ color, size, overlay = false }: { color: THREE.Color; size: numb
     const m = mesh.current;
     if (!m) return;
     m.quaternion.copy(camera.quaternion);
-    m.scale.setScalar(camera.position.distanceTo(m.getWorldPosition(world)) * size);
+    const d = camera.position.distanceTo(m.getWorldPosition(world));
+    m.scale.setScalar(d * size);
+    // Close up, a model takes over from the point of light.
+    if (fadeNear) material.uniforms.uAlpha.value = THREE.MathUtils.smoothstep(d, fadeNear * 0.5, fadeNear * 2);
   });
   return (
     <mesh ref={mesh} material={material}>
@@ -629,20 +636,88 @@ function Moons({
   );
 }
 
-/** One spacecraft: its JPL path since launch and where it is now. */
-function Craft({ name, track, shared, trueScale, selected, onSelect, labels }: { name: string; track: Track; shared: React.RefObject<Shared>; trueScale: boolean; selected: string | null; onSelect: (id: string) => void; labels: boolean }) {
-  const points = useMemo(() => {
-    const list: Float64Array[] = [];
-    for (let i = 0; i < track.length; i += 4) list.push(track.subarray(i + 1, i + 4));
-    return list;
+const pathVertex = /* glsl */ `
+  attribute float aT;
+  varying float vT;
+  void main() {
+    vT = aT;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+/** The path flown so far bright, the planned path ahead faint; brighter for the chosen craft. */
+const pathFragment = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uNow;
+  uniform float uOn;
+  varying float vT;
+  void main() {
+    float past = step(vT, uNow);
+    float a = past * (0.32 + 0.5 * uOn) + (1.0 - past) * (0.07 + 0.08 * uOn);
+    gl_FragColor = vec4(uColor, a);
+  }
+`;
+
+/** Drawn size of a spacecraft model (its dish or shield, across), scene units: enlarged like everything else. */
+const CRAFT_SIZE = 0.09;
+const julian = (d: Date) => d.getTime() / 86_400_000 + 2440587.5;
+
+/** One spacecraft: its JPL path since launch, its model turned to Earth or the Sun, and the milestones on the way. */
+function Craft({ info, track, shared, trueScale, selected, onSelect, labels }: { info: (typeof CRAFT)[number]; track: Track; shared: React.RefObject<Shared>; trueScale: boolean; selected: string | null; onSelect: (id: string) => void; labels: boolean }) {
+  const name = info.name;
+  const on = selected === name;
+  const path = useMemo(() => {
+    const n = track.length / 4;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    const t = new Float32Array(n);
+    for (let i = 0; i < n; i++) t[i] = track[i * 4];
+    g.setAttribute("aT", new THREE.BufferAttribute(t, 1));
+    const material = new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: CRAFT_COLOR }, uNow: { value: 0 }, uOn: { value: 0 } },
+      vertexShader: pathVertex,
+      fragmentShader: pathFragment,
+      transparent: true,
+      depthWrite: false,
+    });
+    const line = new THREE.Line(g, material);
+    line.frustumCulled = false;
+    return { line, material, mix: -1, n };
   }, [track]);
-  const { object, update } = useScaledLine(points, CRAFT_COLOR, 0.28);
+  // Milestones: flybys where the planet was, the rest where the craft was.
+  const events = useMemo(
+    () =>
+      info.events.map((e) => {
+        const date = new Date(`${e.date}T12:00:00Z`);
+        return { ...e, au: e.body ? helio(e.body, date) : trackAt(track, date), at: new THREE.Vector3() };
+      }),
+    [info, track],
+  );
   const group = useRef<THREE.Group>(null);
+  const model = useRef<THREE.Group>(null);
+  const marks = useRef<(THREE.Group | null)[]>([]);
   const out = useMemo<[number, number, number]>(() => [0, 0, 0], []);
   const at = useMemo(() => new THREE.Vector3(), []);
+  const bounds = useMemo(() => new THREE.Sphere(), []);
   useFrame(() => {
     const s = shared.current;
-    update(s.mix);
+    const now = julian(s.date);
+    path.material.uniforms.uNow.value = now;
+    path.material.uniforms.uOn.value = on ? 1 : 0;
+    if (Math.abs(path.mix - s.mix) > 1e-4) {
+      const attr = path.line.geometry.getAttribute("position") as THREE.BufferAttribute;
+      for (let i = 0; i < path.n; i++) {
+        toScene(track.subarray(i * 4 + 1, i * 4 + 4), out, s.mix);
+        attr.setXYZ(i, out[0], out[1], out[2]);
+      }
+      attr.needsUpdate = true;
+      path.mix = s.mix;
+      events.forEach((e, i) => {
+        if (!e.au) return;
+        toScene(e.au, out, s.mix);
+        e.at.set(out[0], out[1], out[2]);
+        marks.current[i]?.position.copy(e.at);
+      });
+    }
     const v = trackAt(track, s.date);
     if (group.current) group.current.visible = !!v;
     if (!v) {
@@ -652,15 +727,57 @@ function Craft({ name, track, shared, trueScale, selected, onSelect, labels }: {
     toScene(v, out, s.mix);
     at.set(out[0], out[1], out[2]);
     group.current?.position.copy(at);
-    place(shared, name, at, MARKER_RADIUS);
+    place(shared, name, at, CRAFT_SIZE);
+    // The path flown so far, for framing the whole journey.
+    bounds.setFromPoints([new THREE.Vector3(0, 0, 0), at, ...events.filter((e) => e.au && Date.parse(e.date) <= s.date.getTime()).map((e) => e.at)]);
+    s.paths.set(name, bounds);
+    // Dish to Earth (the Voyagers, New Horizons), or shield to the Sun (Parker).
+    const m = model.current;
+    if (m) {
+      const earth = s.places.get("Earth");
+      if (info.faces === "sun" || !earth) m.lookAt(0, 0, 0);
+      else m.lookAt(earth);
+    }
   });
   return (
     <>
-      {object && <primitive object={object} />}
+      <primitive object={path.line} />
       <group ref={group}>
-        <Glow color={CRAFT_COLOR} size={0.045} />
-        {labels && selected !== name && <Tag id={name} label={name} onSelect={onSelect} dot={trueScale} tone="text-[#7fd4ff]/75" />}
+        <Glow color={CRAFT_COLOR} size={0.045} fadeNear={CRAFT_SIZE * 12} />
+        <group ref={model} scale={CRAFT_SIZE}>
+          <group
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(name);
+            }}
+          >
+            <CraftModel name={name} />
+          </group>
+        </group>
+        {labels && !on && <Tag id={name} label={name} onSelect={onSelect} dot={trueScale} tone="text-[#7fd4ff]/75" />}
       </group>
+      {on &&
+        labels &&
+        events.map((e, i) =>
+          e.au ? (
+            <group
+              key={e.label}
+              ref={(g) => {
+                marks.current[i] = g;
+                if (g) g.position.copy(e.at);
+              }}
+            >
+              <Html center zIndexRange={[4, 0]} style={{ pointerEvents: "none" }}>
+                <div className="flex flex-col items-center">
+                  <span className="block h-2.5 w-2.5 rounded-full border border-[#7fd4ff] bg-[#7fd4ff]/25 shadow-[0_0_10px_#7fd4ff]" />
+                  <span className="mt-1.5 whitespace-nowrap rounded-full bg-black/55 px-2 py-0.5 font-mono text-[9px] tracking-[0.16em] text-[#bfe9ff]">
+                    {e.label.toUpperCase()} · {e.date.slice(0, 4)}
+                  </span>
+                </div>
+              </Html>
+            </group>
+          ) : null,
+        )}
     </>
   );
 }
@@ -778,9 +895,22 @@ function Fly({
       return;
     }
     const radius = s.radii.get(selected!) ?? MARKER_RADIUS;
+    const journey = looking.current === "journey" ? s.paths.get(selected!) : null;
+    if (journey) {
+      // The whole path so far, from above and a little to the side; no riding along.
+      if (!flying.current) return;
+      offset.set(0.35, 1, 0.75).normalize();
+      goal.copy(journey.center).addScaledVector(offset, Math.max(journey.radius, 1) * 3.1);
+      camera.position.lerp(goal, k);
+      c.target.lerp(journey.center, k);
+      c.update();
+      if (camera.position.distanceTo(goal) < journey.radius * 0.01 + 0.01) flying.current = false;
+      return;
+    }
     if (flying.current) {
       // Come in from the Sun's side, a little above, so the lit face shows.
-      const distance = selected === "Sun" ? radius * 9 + 0.6 : radius * 6 + 0.6;
+      const isCraft = CRAFT.some((x) => x.name === selected);
+      const distance = selected === "Sun" ? radius * 9 + 0.6 : isCraft ? radius * 5 : radius * 6 + 0.6;
       const spot = s.places.get("grs");
       const north = selected ? s.axes.get(selected) : null;
       sunward.copy(target).negate().normalize();
@@ -800,8 +930,9 @@ function Fly({
       } else {
         offset.copy(sunward);
         if (offset.lengthSq() < 1e-6) offset.set(0, 0, 1);
-        offset.applyAxisAngle(up, 0.7);
-        offset.y += 0.35;
+        // Spacecraft are seen from the side, so the dish doesn't hide the rest.
+        offset.applyAxisAngle(up, isCraft ? 1.35 : 0.7);
+        offset.y += isCraft ? 0.5 : 0.35;
         goal.copy(target).add(offset.normalize().multiplyScalar(looking.current === "plates" ? radius * 3.6 : distance));
       }
       camera.position.lerp(goal, k);
@@ -885,7 +1016,7 @@ export default function CosmoscopeScene({
   panelShift: number;
 }) {
   const controls = useRef<OrbitControlsImpl | null>(null);
-  const shared = useRef<Shared>({ places: new Map(), radii: new Map(), mix: 0, date: new Date(0), axes: new Map() });
+  const shared = useRef<Shared>({ places: new Map(), radii: new Map(), mix: 0, date: new Date(0), axes: new Map(), paths: new Map() });
   const common = useMemo<Common>(() => ({ uTime: { value: 0 }, uFill: { value: 0 } }), []);
   const quality = useMemo(() => getQuality(), []);
   return (
@@ -899,6 +1030,9 @@ export default function CosmoscopeScene({
       <group scale={12}>
         <Stars />
       </group>
+      {/* Only the spacecraft models use three.js lights; the worlds light themselves in their shaders. */}
+      <ambientLight intensity={0.25} />
+      <pointLight position={[0, 0, 0]} intensity={2.6} decay={0} />
       {/* Planets first: it moves the clock and the scale for the rest each frame. */}
       <Planets
         clock={clock}
@@ -915,7 +1049,7 @@ export default function CosmoscopeScene({
       {layers.craft &&
         CRAFT.map((c) => {
           const track = tracks.get(c.name);
-          return track ? <Craft key={c.name} name={c.name} track={track} shared={shared} trueScale={trueScale} selected={selected} onSelect={onSelect} labels={layers.labels} /> : null;
+          return track ? <Craft key={c.name} info={c} track={track} shared={shared} trueScale={trueScale} selected={selected} onSelect={onSelect} labels={layers.labels} /> : null;
         })}
       {swarm && <Hazardous swarm={swarm} shared={shared} />}
       {rock && <Asteroid rock={rock} shared={shared} trueScale={trueScale} selected={selected} onSelect={onSelect} />}

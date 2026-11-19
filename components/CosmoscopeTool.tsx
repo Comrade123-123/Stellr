@@ -7,6 +7,7 @@ import type { Swarm } from "@/components/canvas/AsteroidScene";
 import type { Clock, Layers, Look, Rock } from "@/components/canvas/CosmoscopeScene";
 import { usePlace } from "@/components/PlacePicker";
 import Dossier from "@/components/cosmoscope/Dossier";
+import Navigator from "@/components/cosmoscope/Navigator";
 import Timeline, { type Mode } from "@/components/cosmoscope/Timeline";
 import { AU_LIGHT_S, DAY_MS, Icon, Stat, Thumb, Toggle, auText, dayText, fmt, glass, isBody, isMoon, kmText, lightTime } from "@/components/cosmoscope/ui";
 import ScrambleText from "@/components/ui/ScrambleText";
@@ -399,6 +400,34 @@ export default function CosmoscopeTool() {
           ) : (
             <p className="mt-4 text-[12px] text-gold">{trackNote(craft.name)}</p>
           )}
+          {tracks.get(craft.name) && (
+            <div className="mt-5">
+              <p className="font-mono text-[9px] tracking-[0.2em] text-ink/40">SEE IN 3D</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <button type="button" onClick={() => setLook((prev) => ({ kind: "journey", n: (prev?.n ?? 0) + 1 }))} className="rounded-full border border-[#7fd4ff]/50 px-3 py-1.5 text-[12px] text-[#9fdcff] transition-colors hover:bg-[#7fd4ff] hover:text-void">
+                  Its whole journey
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLook((prev) => ({ kind: "close", n: (prev?.n ?? 0) + 1 }))}
+                  className="rounded-full border border-[#7fd4ff]/50 px-3 py-1.5 text-[12px] text-[#9fdcff] transition-colors hover:bg-[#7fd4ff] hover:text-void"
+                >
+                  The spacecraft up close
+                </button>
+              </div>
+              <ul className="mt-4 space-y-1.5">
+                {craft.events.map((e) => (
+                  <li key={e.label}>
+                    <button type="button" onClick={() => jump(Date.parse(`${e.date}T12:00:00Z`))} className="flex w-full items-baseline justify-between gap-3 text-left text-[12px] text-ink/70 transition-colors hover:text-[#9fdcff]">
+                      <span>{e.body ? `${e.label} flyby` : e.label}</span>
+                      <span className="font-mono text-[10px] text-ink/40">{fmt(Date.parse(`${e.date}T12:00:00Z`), { day: "2-digit", month: "short", year: "numeric" })}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[10px] text-ink/35">Choose a milestone to go to that day.</p>
+            </div>
+          )}
         </div>
       );
     if (selected === "asteroid" && rock)
@@ -562,29 +591,16 @@ export default function CosmoscopeTool() {
         </header>
 
         {/* Bodies, down the left on wide screens; a strip along the bottom on phones. */}
-        <nav aria-label="Bodies" className={`absolute left-4 top-20 z-10 hidden w-[200px] lg:block ${hide}`}>
-          <div className={`${glass} cosmo-scroll max-h-[calc(100svh-15rem)] overflow-y-auto p-2`}>
-            {rail.map((g) => (
-              <div key={g.group} className="mb-1">
-                <p className="px-2.5 pb-1 pt-2 font-mono text-[9px] tracking-[0.2em] text-ink/35">{g.group}</p>
-                {g.items.map((name) => {
-                  const on = selected === name || (isMoon(selected) && MOONS.find((m) => m.name === selected)?.parent === name);
-                  return (
-                    <button
-                      key={name}
-                      type="button"
-                      onClick={() => setSelected(selected === name ? null : name)}
-                      className={`flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left text-[13px] transition-colors ${on ? "bg-ink/[0.09] text-ink" : "text-ink/70 hover:bg-ink/[0.05] hover:text-ink"}`}
-                    >
-                      <Thumb name={name} size={22} />
-                      {name}
-                      {on && <span className="ml-auto block h-1.5 w-1.5 rounded-full bg-gold" />}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
+        <nav aria-label="Bodies" className={`absolute left-4 top-20 z-10 hidden lg:block ${hide}`}>
+          <Navigator
+            selected={selected}
+            onSelect={setSelected}
+            shown={shown}
+            craftSunAu={(name) => {
+              const d = shown ? away(name, shown) : null;
+              return d ? d.sunAu : trackFailed.has(name) ? "—" : tracks.get(name) ? "off" : "…";
+            }}
+          />
         </nav>
         <nav aria-label="Bodies" className={`cosmo-scroll absolute inset-x-0 bottom-3 z-10 flex gap-2 overflow-x-auto px-4 lg:hidden ${hide}`}>
           {rail.flatMap((g) => g.items).map((name) => (
@@ -607,7 +623,7 @@ export default function CosmoscopeTool() {
         </aside>
 
         {/* Time, along the bottom on wide screens. */}
-        <div className={`absolute bottom-4 left-[232px] right-[372px] z-10 hidden lg:block ${hide}`}>
+        <div className={`absolute bottom-4 left-4 right-[372px] z-10 hidden lg:block ${hide}`}>
           <Timeline shown={shown} today={today} mode={mode} reverse={reverse} presets={presets} onLive={goLive} onRate={(r) => setRate(r)} onReverse={() => {
             setReverse(!reverse);
             if (!mode.live && mode.rate) setRate(mode.rate, !reverse);
