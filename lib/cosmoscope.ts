@@ -63,7 +63,7 @@ export const BODIES: BodyInfo[] = [
   { name: "Earth", kind: "Rocky planet · home", about: "Our home, and the only world known to carry life. Oceans cover 71% of its surface; one large Moon steadies its tilt.", radius: 0.42, texture: "/textures/2k_earth_daymap.jpg", diameterKm: 12_756, dayHours: 24.0, spinHours: 23.93, yearDays: 365.26, moons: "1", tempC: 15, tilt: 23.4 },
   { name: "Mars", kind: "Rocky planet", about: "A cold, dusty desert with the tallest volcano known, Olympus Mons, and dry riverbeds from a wetter past. Rovers are exploring it now.", radius: 0.3, texture: "/textures/2k_mars.jpg", diameterKm: 6792, dayHours: 24.7, spinHours: 24.62, yearDays: 687.0, moons: "2", tempC: -65, tilt: 25.2 },
   { name: "Jupiter", kind: "Gas giant", about: "The largest planet, more than twice the mass of all the others together: a ball of hydrogen and helium with no solid surface, banded by storms.", radius: 1.3, texture: "/textures/2k_jupiter.jpg", diameterKm: 142_984, dayHours: 9.9, spinHours: 9.93, yearDays: 4331, moons: "95+", tempC: -110, tilt: 3.1 },
-  { name: "Saturn", kind: "Gas giant", about: "A gas giant less dense than water, circled by the brightest rings of any planet: ice and rock spread 280,000 km wide.", radius: 1.1, texture: "/textures/2k_saturn.jpg", ring: "/textures/2k_saturn_ring_alpha.png", diameterKm: 120_536, dayHours: 10.7, spinHours: 10.66, yearDays: 10_747, moons: "270+", tempC: -140, tilt: 26.7 },
+  { name: "Saturn", kind: "Gas giant", about: "A gas giant less dense than water, circled by the brightest rings of any planet: ice and rock spread 280,000 km wide.", radius: 1.1, texture: "/textures/2k_saturn.jpg", ring: "/textures/2k_saturn_ring_alpha.png", diameterKm: 120_536, dayHours: 10.7, spinHours: 10.66, yearDays: 10_747, moons: "274", tempC: -140, tilt: 26.7 },
   { name: "Uranus", kind: "Ice giant", about: "An ice giant knocked onto its side: each pole spends 42 years in sunlight, then 42 in darkness. Only Voyager 2 has visited.", radius: 0.75, texture: "/textures/2k_uranus.jpg", diameterKm: 51_118, dayHours: 17.2, spinHours: -17.24, yearDays: 30_589, moons: "28+", tempC: -195, tilt: 97.8 },
   { name: "Neptune", kind: "Ice giant", about: "The farthest planet, with the fastest winds measured anywhere in the Solar System, over 2,000 km/h. It was found by mathematics before it was seen, in 1846.", radius: 0.72, texture: "/textures/2k_neptune.jpg", diameterKm: 49_528, dayHours: 16.1, spinHours: 16.11, yearDays: 59_800, moons: "16", tempC: -200, tilt: 28.3 },
   { name: "Pluto", kind: "Dwarf planet", about: "A dwarf planet of the Kuiper Belt, smaller than our Moon, with a heart-shaped plain of nitrogen ice. Its tilted, stretched orbit brings it closer to the Sun than Neptune for 20 years in every 248. New Horizons flew past in 2015.", radius: 0.2, color: "#c9b59a", diameterKm: 2377, dayHours: 153.3, spinHours: -153.3, yearDays: 90_560, moons: "5", tempC: -225, tilt: 122.5 },
@@ -149,7 +149,46 @@ export function orbitPoints(name: BodyName, date: Date, points = 360): [number, 
   return out;
 }
 
-export type MoonName = "Moon" | "Io" | "Europa" | "Ganymede" | "Callisto" | "Titan";
+export type MoonName =
+  | "Moon"
+  | "Phobos"
+  | "Deimos"
+  | "Io"
+  | "Europa"
+  | "Ganymede"
+  | "Callisto"
+  | "Mimas"
+  | "Enceladus"
+  | "Tethys"
+  | "Dione"
+  | "Rhea"
+  | "Titan"
+  | "Iapetus"
+  | "Miranda"
+  | "Ariel"
+  | "Umbriel"
+  | "Titania"
+  | "Oberon"
+  | "Triton"
+  | "Charon";
+
+/** How a moon's surface is drawn: the Moon from its map, the rest procedurally after spacecraft images. */
+export type Surface =
+  | "moon"
+  | "potato"
+  | "io"
+  | "europa"
+  | "ganymede"
+  | "callisto"
+  | "mimas"
+  | "enceladus"
+  | "icy"
+  | "titan"
+  | "iapetus"
+  | "miranda"
+  | "dark-icy"
+  | "triton"
+  | "charon";
 
 export interface MoonInfo {
   name: MoonName;
@@ -157,29 +196,59 @@ export interface MoonInfo {
   /** Drawn radius, scene units. */
   radius: number;
   color: string;
+  surface: Surface;
   texture?: string;
   diameterKm: number;
   /** Mean distance from its planet, km. */
   distanceKm: number;
-  /** Orbital period, days. */
+  /** Orbital period, days; negative for a moon that orbits backwards. */
   periodDays: number;
+  /** Where its position comes from: computed exactly, JPL Horizons, or a mean circular orbit (place along it approximate). */
+  source: "exact" | "horizons" | "mean";
+  /** For a mean orbit: angle along it at J2000, degrees (not measured; it only spreads the moons out). */
+  phase?: number;
+  /** For a mean orbit: tilt from the planet's equator, degrees. */
+  tilt?: number;
   note: string;
 }
 
+/** Drawn size for the smaller moons: exaggerated like the planets, with a floor so they stay visible. */
+const drawn = (diameterKm: number) => Math.max(0.028, 0.12 * Math.pow(diameterKm / 3475, 0.7));
+
+/** Figures from NASA's planetary satellite fact sheets (mean distance and sidereal period). */
 export const MOONS: MoonInfo[] = [
-  { name: "Moon", parent: "Earth", radius: 0.12, color: "#bdbdbd", texture: "/textures/1k_moon.jpg", diameterKm: 3475, distanceKm: 384_400, periodDays: 27.32, note: "Always shows Earth the same face." },
-  { name: "Io", parent: "Jupiter", radius: 0.13, color: "#e8d27a", diameterKm: 3643, distanceKm: 421_700, periodDays: 1.769, note: "The most volcanic world known." },
-  { name: "Europa", parent: "Jupiter", radius: 0.12, color: "#d9cbb3", diameterKm: 3122, distanceKm: 671_034, periodDays: 3.551, note: "An ocean of liquid water under its ice." },
-  { name: "Ganymede", parent: "Jupiter", radius: 0.19, color: "#9c9284", diameterKm: 5268, distanceKm: 1_070_412, periodDays: 7.155, note: "The largest moon in the Solar System, bigger than Mercury." },
-  { name: "Callisto", parent: "Jupiter", radius: 0.17, color: "#6f6659", diameterKm: 4821, distanceKm: 1_882_709, periodDays: 16.689, note: "One of the most heavily cratered surfaces known." },
-  { name: "Titan", parent: "Saturn", radius: 0.18, color: "#d39a4a", diameterKm: 5150, distanceKm: 1_221_870, periodDays: 15.945, note: "A thick orange atmosphere, with lakes of liquid methane." },
+  { name: "Moon", parent: "Earth", radius: 0.12, color: "#bdbdbd", surface: "moon", texture: "/textures/1k_moon.jpg", diameterKm: 3475, distanceKm: 384_400, periodDays: 27.32, source: "exact", note: "Always shows Earth the same face." },
+  { name: "Phobos", parent: "Mars", radius: 0.045, color: "#6e6259", surface: "potato", diameterKm: 22.5, distanceKm: 9376, periodDays: 0.3189, source: "mean", phase: 40, note: "A lumpy, cratered rock spiralling slowly inwards: in some 50 million years Mars's pull will tear it apart." },
+  { name: "Deimos", parent: "Mars", radius: 0.032, color: "#857a6d", surface: "potato", diameterKm: 12.4, distanceKm: 23_463, periodDays: 1.2624, source: "mean", phase: 220, note: "Mars's smaller, outer moon, smoothed by a blanket of dust." },
+  { name: "Io", parent: "Jupiter", radius: 0.13, color: "#e8d27a", surface: "io", diameterKm: 3643, distanceKm: 421_700, periodDays: 1.769, source: "exact", note: "The most volcanic world known: over 400 active volcanoes, squeezed hot by Jupiter's tides." },
+  { name: "Europa", parent: "Jupiter", radius: 0.12, color: "#d9cbb3", surface: "europa", diameterKm: 3122, distanceKm: 671_034, periodDays: 3.551, source: "exact", note: "A cracked shell of ice over an ocean holding more water than all of Earth's. NASA's Europa Clipper arrives in 2030." },
+  { name: "Ganymede", parent: "Jupiter", radius: 0.19, color: "#9c9284", surface: "ganymede", diameterKm: 5268, distanceKm: 1_070_412, periodDays: 7.155, source: "exact", note: "The largest moon in the Solar System, bigger than Mercury, and the only one with its own magnetic field." },
+  { name: "Callisto", parent: "Jupiter", radius: 0.17, color: "#6f6659", surface: "callisto", diameterKm: 4821, distanceKm: 1_882_709, periodDays: 16.689, source: "exact", note: "One of the most heavily cratered surfaces known, almost unchanged for four billion years." },
+  { name: "Mimas", parent: "Saturn", radius: drawn(396), color: "#a9a9a5", surface: "mimas", diameterKm: 396, distanceKm: 185_539, periodDays: 0.9424, source: "mean", phase: 10, note: "Marked by Herschel, a crater a third as wide as the moon itself." },
+  { name: "Enceladus", parent: "Saturn", radius: drawn(504), color: "#f2f5f7", surface: "enceladus", diameterKm: 504, distanceKm: 237_948, periodDays: 1.3702, source: "mean", phase: 130, note: "The brightest world in the Solar System. Jets of water from an ocean under its south pole feed Saturn's E ring." },
+  { name: "Tethys", parent: "Saturn", radius: drawn(1062), color: "#d8d6d0", surface: "icy", diameterKm: 1062, distanceKm: 294_619, periodDays: 1.8878, source: "mean", phase: 250, note: "Almost pure water ice, split by Ithaca Chasma, a canyon running three-quarters of the way round." },
+  { name: "Dione", parent: "Saturn", radius: drawn(1123), color: "#c9c7c2", surface: "icy", diameterKm: 1123, distanceKm: 377_396, periodDays: 2.7369, source: "mean", phase: 75, note: "Laced with bright ice cliffs hundreds of metres high." },
+  { name: "Rhea", parent: "Saturn", radius: drawn(1527), color: "#bdbab4", surface: "icy", diameterKm: 1527, distanceKm: 527_108, periodDays: 4.5182, source: "mean", phase: 300, note: "Saturn's second-largest moon: cold, airless and heavily cratered." },
+  { name: "Titan", parent: "Saturn", radius: 0.18, color: "#d39a4a", surface: "titan", diameterKm: 5150, distanceKm: 1_221_870, periodDays: 15.945, source: "horizons", note: "The only moon with a thick atmosphere, and the only world besides Earth with lakes and seas on its surface: liquid methane and ethane." },
+  { name: "Iapetus", parent: "Saturn", radius: drawn(1469), color: "#8a7b67", surface: "iapetus", diameterKm: 1469, distanceKm: 3_560_820, periodDays: 79.3215, source: "mean", phase: 190, tilt: 15, note: "Two-faced: the hemisphere it leads with is as dark as coal, the other bright as snow, with a mountain ridge along its equator." },
+  { name: "Miranda", parent: "Uranus", radius: drawn(472), color: "#a6a7a8", surface: "miranda", diameterKm: 472, distanceKm: 129_390, periodDays: 1.4135, source: "mean", phase: 60, tilt: 4, note: "A patchwork of grooves and cliffs, including Verona Rupes, perhaps the tallest cliff in the Solar System." },
+  { name: "Ariel", parent: "Uranus", radius: drawn(1158), color: "#b3b1ad", surface: "icy", diameterKm: 1158, distanceKm: 191_020, periodDays: 2.5204, source: "mean", phase: 160, note: "The brightest of Uranus's moons, its surface cut by long valleys." },
+  { name: "Umbriel", parent: "Uranus", radius: drawn(1169), color: "#6b6964", surface: "dark-icy", diameterKm: 1169, distanceKm: 266_000, periodDays: 4.1442, source: "mean", phase: 280, note: "The darkest of Uranus's large moons, with one bright ring-shaped spot, Wunda." },
+  { name: "Titania", parent: "Uranus", radius: drawn(1577), color: "#a59e95", surface: "icy", diameterKm: 1577, distanceKm: 435_910, periodDays: 8.7059, source: "mean", phase: 20, note: "Uranus's largest moon, scarred by canyons as long as 1,500 km." },
+  { name: "Oberon", parent: "Uranus", radius: drawn(1523), color: "#958c84", surface: "dark-icy", diameterKm: 1523, distanceKm: 583_520, periodDays: 13.4632, source: "mean", phase: 200, note: "The outermost large moon of Uranus: old, cratered, with dark material pooled on crater floors." },
+  { name: "Triton", parent: "Neptune", radius: drawn(2707), color: "#d8c3b8", surface: "triton", diameterKm: 2707, distanceKm: 354_759, periodDays: -5.8769, source: "mean", phase: 110, tilt: 157, note: "Orbits backwards, so it was probably captured from the Kuiper Belt. Voyager 2 saw nitrogen geysers erupting from its icy surface." },
+  { name: "Charon", parent: "Pluto", radius: drawn(1212) * 1.4, color: "#9d9a96", surface: "charon", diameterKm: 1212, distanceKm: 19_591, periodDays: 6.3872, source: "mean", phase: 0, note: "Half Pluto's size, so the two circle a point between them. Its north pole wears a red cap, Mordor Macula." },
 ];
 
 export const moonInfo = (name: MoonName) => MOONS.find((m) => m.name === name)!;
 
+const J2000 = Date.UTC(2000, 0, 1, 12);
+
 /**
- * A moon's position relative to its planet (ecliptic, AU), from astronomy-engine for the Moon
- * and Jupiter's four; Titan comes from JPL Horizons (`titan`), as astronomy-engine lacks it.
+ * A moon's position relative to its planet (ecliptic, AU): exact from astronomy-engine for the
+ * Moon and Jupiter's four; Titan from JPL Horizons (`titan`); the others on a circular orbit at
+ * their mean distance and period, in their planet's equatorial plane (tilted where `tilt` says),
+ * starting from an arbitrary angle: the orbit is real, the place along it approximate.
  */
 export function moonOffset(name: MoonName, date: Date, titan: Track | null): [number, number, number] | null {
   if (name === "Moon") {
@@ -187,18 +256,36 @@ export function moonOffset(name: MoonName, date: Date, titan: Track | null): [nu
     return ecliptic(v.x, v.y, v.z);
   }
   if (name === "Titan") return titan ? trackAt(titan, date) : null;
-  const m = JupiterMoons(date)[name.toLowerCase() as "io" | "europa" | "ganymede" | "callisto"];
-  return ecliptic(m.x, m.y, m.z);
+  if (name === "Io" || name === "Europa" || name === "Ganymede" || name === "Callisto") {
+    const m = JupiterMoons(date)[name.toLowerCase() as "io" | "europa" | "ganymede" | "callisto"];
+    return ecliptic(m.x, m.y, m.z);
+  }
+  const m = moonInfo(name);
+  // The planet's equator in scene axes: `prime` at spin 0 is the fixed node, `ninety` 90° on.
+  const f = bodyFrame(m.parent, date, 0);
+  const tilt = ((m.tilt ?? 0) * Math.PI) / 180;
+  const u = f.prime;
+  const n0 = cross(f.north, u);
+  // Tilt the orbit about the node; a tilt past 90° makes it run backwards.
+  const v = [0, 1, 2].map((i) => n0[i] * Math.cos(tilt) + f.north[i] * Math.sin(tilt));
+  const turns = (date.getTime() - J2000) / 86_400_000 / Math.abs(m.periodDays);
+  const a = ((m.phase ?? 0) * Math.PI) / 180 + 2 * Math.PI * (turns - Math.floor(turns));
+  const au = m.distanceKm / AU_KM;
+  const sx = au * (u[0] * Math.cos(a) + v[0] * Math.sin(a));
+  const sy = au * (u[1] * Math.cos(a) + v[1] * Math.sin(a));
+  const sz = au * (u[2] * Math.cos(a) + v[2] * Math.sin(a));
+  // Scene axes (x, z, −y) back to ecliptic.
+  return [sx, -sz, sy];
 }
 
 /**
- * How far from its planet a moon is drawn: proportional to the planet's drawn size, with the
- * real distance (in planet radii) compressed, so a moon never lands inside its planet.
+ * How far from its planet a moon is drawn: in the planet's drawn radii, with the real distance
+ * (in planet radii) compressed, so moons clear the planet and Saturn's rings but stay near.
  */
 export function moonDistance(moon: MoonInfo) {
   const parent = bodyInfo(moon.parent);
   const ratio = moon.distanceKm / (parent.diameterKm / 2);
-  return parent.radius * 0.5 * Math.pow(ratio, 0.6);
+  return parent.radius * (1 + 0.85 * Math.sqrt(ratio));
 }
 
 export interface CraftInfo {

@@ -17,7 +17,7 @@ Live at **[stellr-coral.vercel.app](https://stellr-coral.vercel.app)**.
 | Asteroid Sentinel | `/asteroid-sentinel` | Near-Earth asteroids on approach, a year ahead; look up any asteroid; every potentially hazardous asteroid on its orbit | JPL CAD, SBDB, Sentry |
 | Sky Events | `/sky-events` | Meteor showers, eclipses, conjunctions and launches, timed for your sky | astronomy-engine, Launch Library 2 |
 | Space Weather | `/space-weather` | Solar wind, flares, geomagnetic storms and aurora odds | NOAA SWPC |
-| Cosmoscope | `/cosmoscope` | Planets, Pluto, major moons and spacecraft where they really are, at any moment ±10 years; true-scale view; hazardous-asteroid layer; panels can be hidden (`H`) | astronomy-engine, JPL Horizons |
+| Cosmoscope | `/cosmoscope` | The Sun, planets, Pluto, twenty moons and four spacecraft where they really are, at any moment; realistic shading (Earth's night lights and plates, Jupiter's polar cyclones, Saturn's hexagon and ring shadows); a full profile of each world below the 3D view; true-scale view; layers; panels can be hidden (`H`) | astronomy-engine, JPL Horizons, NASA fact sheets, PB2002 plate boundaries |
 | Exoplanet Lab | `/exoplanet-lab` | Pull a star's TESS light curve, search it for transits, vet the signal and see what the world would be like | MAST (TESS), NASA Exoplanet Archive |
 | Wobble | `/wobble` | A research agent that searches TESS stars for planets every day and keeps a notebook. **Private**, behind a password | MAST, NASA Exoplanet Archive |
 
@@ -150,5 +150,7 @@ public/              textures, the Saturn V model, the vetter model, fallback im
   licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 - Saturn V model by [NASA 3D Resources](https://science.nasa.gov/3d-resources/), repainted. No
   endorsement implied.
+- Earth's plate boundaries: Peter Bird (2003), PB2002, via [Hugo Ahlenius, Nordpil](https://github.com/fraxen/tectonicplates),
+  licensed ODC-By 1.0.
 - Positions from [astronomy-engine](https://github.com/cosinekitty/astronomy) and
   [satellite.js](https://github.com/shashwatak/satellite-js).

@@ -4,87 +4,42 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { Swarm } from "@/components/canvas/AsteroidScene";
-import type { Clock, Look, Rock } from "@/components/canvas/CosmoscopeScene";
-import PlacePicker, { usePlace } from "@/components/PlacePicker";
+import type { Clock, Layers, Look, Rock } from "@/components/canvas/CosmoscopeScene";
+import { usePlace } from "@/components/PlacePicker";
+import Dossier from "@/components/cosmoscope/Dossier";
+import Timeline, { type Mode } from "@/components/cosmoscope/Timeline";
+import { AU_LIGHT_S, DAY_MS, Icon, Stat, Thumb, Toggle, auText, dayText, fmt, glass, isBody, isMoon, kmText, lightTime } from "@/components/cosmoscope/ui";
 import ScrambleText from "@/components/ui/ScrambleText";
 import { asteroidAt, type Elements } from "@/lib/asteroids";
-import {
-  AU_KM,
-  BODIES,
-  CRAFT,
-  MOONS,
-  bodyInfo,
-  distances,
-  helio,
-  moonOffset,
-  nextOpposition,
-  night,
-  stormInDaylight,
-  trackAt,
-  trackSpan,
-  type BodyName,
-  type MoonName,
-  type Track,
-} from "@/lib/cosmoscope";
+import { AU_KM, BODIES, CRAFT, MOONS, bodyInfo, distances, helio, moonOffset, nextOpposition, night, stormInDaylight, trackAt, trackSpan, type BodyName, type Track } from "@/lib/cosmoscope";
+import { PROFILES, type Feature } from "@/lib/cosmoscope-profiles";
 
 const Scene = dynamic(() => import("@/components/canvas/CosmoscopeScene"), { ssr: false });
 
-const DAY_MS = 86_400_000;
-/** Playback speeds, days per second; 0 is paused. */
-const SPEEDS: [string, number, string][] = [
-  ["DAY/S", 1, "A DAY EVERY SECOND"],
-  ["WEEK/S", 7, "A WEEK EVERY SECOND"],
-  ["MONTH/S", 30, "A MONTH EVERY SECOND"],
-  ["YEAR/S", 365, "A YEAR EVERY SECOND"],
-];
-/** The slider reaches this far either side of today; the date box goes anywhere. */
-const SLIDER_DAYS = 3650;
-
-const fmt = (t: number, opts: Intl.DateTimeFormatOptions, timeZone?: string) =>
-  new Intl.DateTimeFormat("en-GB", { ...opts, timeZone }).format(new Date(t)).toUpperCase();
-
-function lightTime(s: number) {
-  if (s < 60) return `${s.toFixed(1)} S`;
-  if (s < 3600) return `${Math.floor(s / 60)} MIN ${Math.round(s % 60)} S`;
-  return `${Math.floor(s / 3600)} H ${Math.round((s % 3600) / 60)} MIN`;
-}
-const auText = (au: number) => `${au.toFixed(au < 10 ? 3 : 2)} AU`;
-const kmText = (au: number) => {
-  const km = au * AU_KM;
-  return km >= 1e9 ? `${(km / 1e9).toFixed(2)} BILLION KM` : `${(km / 1e6).toFixed(1)} MILLION KM`;
-};
-const dayText = (h: number) => (Math.abs(h) < 48 ? `${Math.abs(h).toFixed(1)} HOURS` : `${(Math.abs(h) / 24).toFixed(1)} EARTH DAYS`);
-const yearText = (d: number) => (d < 730 ? `${Math.round(d)} DAYS` : `${(d / 365.25).toFixed(1)} YEARS`);
-const AU_LIGHT_S = 499.004784;
-const isBody = (k: string | null): k is BodyName => BODIES.some((b) => b.name === k);
-const isMoon = (k: string | null): k is MoonName => MOONS.some((m) => m.name === k);
 /** Titan's track is fetched in 20-day blocks of ±40 days, so the moment shown is always well inside one. */
 const TITAN_BLOCK_DAYS = 20;
 
-const chip = (on: boolean, tone = "border-gold bg-gold text-void") =>
-  `whitespace-nowrap rounded-full border px-3 py-1.5 font-mono text-[9px] tracking-[0.2em] transition-colors sm:px-4 sm:py-2 sm:text-[10px] ${on ? tone : "border-ink/30 text-ink/70 hover:border-ink/60"}`;
+const LOOK_LABEL: Record<NonNullable<Feature["look"]>, string> = {
+  storm: "Great Red Spot",
+  rings: "Rings from above",
+  north: "North pole",
+  south: "South pole",
+  plates: "Tectonic plates",
+};
 
-/** A labelled figure in the panel. */
-function Fact({ label, value, sub, wide = false, accent = false }: { label: string; value: string; sub?: string; wide?: boolean; accent?: boolean }) {
-  return (
-    <div className={wide ? "col-span-2" : undefined}>
-      <dt className="text-[10px] tracking-[0.2em] text-ink/45">{label}</dt>
-      <dd className={`mt-1 text-sm ${accent ? "text-gold" : "text-ink"}`}>{value}</dd>
-      {sub && <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">{sub}</dd>}
-    </div>
-  );
-}
-
-/** Cosmoscope: the Sun and planets where they really are, at any moment, to fly between. */
+/** Cosmoscope: the Sun, planets, moons and spacecraft where they really are, at any moment, with a profile of each. */
 export default function CosmoscopeTool() {
   const clock = useRef<Clock>({ t: 0, rate: 0, live: true });
   const [shown, setShown] = useState(0);
-  const [mode, setMode] = useState<{ live: boolean; rate: number }>({ live: true, rate: 0 });
+  const [mode, setMode] = useState<Mode>({ live: true, rate: 0 });
   const [reverse, setReverse] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [trueScale, setTrueScale] = useState(false);
   /** Panels hidden: nothing on screen but the solar system. */
   const [clean, setClean] = useState(false);
+  const [layers, setLayers] = useState<Layers>({ orbits: true, labels: true, moons: true, craft: true, plates: false });
+  const [fill, setFill] = useState(false);
+  const [menu, setMenu] = useState(false);
   const [look, setLook] = useState<Look | null>(null);
   /** JPL Horizons paths: spacecraft by name, and "Titan". */
   const [tracks, setTracks] = useState<Map<string, Track>>(() => new Map());
@@ -92,6 +47,10 @@ export default function CosmoscopeTool() {
   const [swarm, setSwarm] = useState<Swarm | null>(null);
   const [hazard, setHazard] = useState<"off" | "loading" | "on" | "error">("off");
   const [rock, setRock] = useState<(Rock & { des: string }) | null>(null);
+  /** Whether the 3D stage is on screen; it stops rendering while scrolled away. */
+  const [onStage, setOnStage] = useState(true);
+  const stage = useRef<HTMLElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const placeState = usePlace();
   const place = placeState.place;
   const reducedMotion = useMemo(() => typeof window !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches, []);
@@ -99,7 +58,7 @@ export default function CosmoscopeTool() {
   /** When the page opened; 0 until mounted, since the time only exists in the browser. */
   const [opened, setOpened] = useState(0);
 
-  // The scene moves the clock every frame; the panel reads it a few times a second.
+  // The scene moves the clock every frame; the panels read it a few times a second.
   useEffect(() => {
     clock.current.t = Date.now();
     setOpened(clock.current.t);
@@ -109,17 +68,38 @@ export default function CosmoscopeTool() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    const el = stage.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([e]) => setOnStage(e.isIntersecting), { threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
   // H hides or shows the panels; Esc brings them back. Not while typing in a field.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (e.metaKey || e.ctrlKey || e.altKey || el?.closest("input, textarea, select, [contenteditable]")) return;
       if (e.key === "h" || e.key === "H") setClean((c) => !c);
-      else if (e.key === "Escape") setClean(false);
+      else if (e.key === "Escape") {
+        setClean(false);
+        setMenu(false);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // The layers menu closes on a click outside it.
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: PointerEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenu(false);
+    };
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [menu]);
 
   const setRate = (rate: number, back = reverse) => {
     clock.current.live = false;
@@ -141,9 +121,14 @@ export default function CosmoscopeTool() {
     setShown(t);
     if (body !== undefined) setSelected(body);
   };
+  const toTop = () => stage.current?.scrollIntoView({ behavior: "smooth" });
+  const toProfile = () => document.getElementById("profile")?.scrollIntoView({ behavior: "smooth" });
+  const choose = (id: string | null, scrollUp = false) => {
+    setSelected(id);
+    if (scrollUp) toTop();
+  };
 
-  const addTrack = (name: string, points: number[]) =>
-    setTracks((prev) => new Map(prev).set(name, Float64Array.from(points)));
+  const addTrack = (name: string, points: number[]) => setTracks((prev) => new Map(prev).set(name, Float64Array.from(points)));
   const failTrack = (name: string) => setTrackFailed((prev) => new Set(prev).add(name));
 
   // Spacecraft paths, once: each is a whole mission, cached a day at the edge.
@@ -214,9 +199,23 @@ export default function CosmoscopeTool() {
       .catch(() => setHazard("error"));
   };
 
+  /** Flies to a feature: some need time moved on (the storm into daylight) or a layer switched on. */
+  const showFeature = (kind: NonNullable<Feature["look"]>, body: BodyName) => {
+    setSelected(body);
+    setTrueScale(false);
+    if (kind === "plates") setLayers((l) => ({ ...l, plates: true }));
+    if (kind === "storm") {
+      setLayers((l) => ({ ...l, labels: true }));
+      const lit = stormInDaylight(new Date(clock.current.t)).getTime();
+      if (lit !== clock.current.t) jump(lit);
+    }
+    // Poles spend years in darkness; light the night side to see them.
+    if (kind === "north" || kind === "south") setFill(true);
+    setLook((prev) => ({ kind, n: (prev?.n ?? 0) + 1 }));
+  };
+
   // Today's start, for the slider's zero.
   const today = opened ? Math.floor(opened / DAY_MS) * DAY_MS : 0;
-  const sliderDays = shown ? Math.max(-SLIDER_DAYS, Math.min(SLIDER_DAYS, Math.round((shown - today) / DAY_MS))) : 0;
 
   const presets = useMemo(() => {
     if (!opened) return [];
@@ -224,13 +223,14 @@ export default function CosmoscopeTool() {
     const list: { label: string; t: number; body: string | null }[] = [];
     for (const p of ["Mars", "Jupiter", "Saturn"] as const) {
       const d = nextOpposition(p, now);
-      if (d) list.push({ label: `${p.toUpperCase()} AT OPPOSITION · ${fmt(d.getTime(), { month: "short", year: "numeric" })}`, t: d.getTime(), body: p });
+      if (d) list.push({ label: `${p} at opposition · ${fmt(d.getTime(), { month: "short", year: "numeric" }).toLowerCase()}`, t: d.getTime(), body: p });
     }
-    if (now.getTime() < Date.UTC(2029, 3, 14)) list.push({ label: "APOPHIS FLIES PAST EARTH · APR 2029", t: Date.UTC(2029, 3, 13, 21, 46), body: "Earth" });
+    if (now.getTime() < Date.UTC(2029, 3, 14)) list.push({ label: "Apophis passes Earth · apr 2029", t: Date.UTC(2029, 3, 13, 21, 46), body: "Earth" });
     return list;
   }, [opened]);
 
   const info = isBody(selected) ? bodyInfo(selected) : null;
+  const profile = isBody(selected) ? PROFILES[selected] : null;
   const dist = useMemo(() => (isBody(selected) && shown ? distances(selected, new Date(shown)) : null), [selected, shown]);
   // The night is worked out once per day shown, not every tick.
   const nightDay = shown ? Math.floor(shown / DAY_MS) : 0;
@@ -270,523 +270,398 @@ export default function CosmoscopeTool() {
     const b = where(craft.name, shown + DAY_MS / 2);
     return a && b ? (Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) * AU_KM) / 86_400 : null;
   })();
-  const craftTable = shown && !selected ? CRAFT.map((c) => ({ name: c.name, d: away(c.name, shown) })) : [];
-  const table = useMemo(
-    () => (shown && !selected ? BODIES.filter((b) => b.name !== "Earth").map((b) => ({ name: b.name, d: distances(b.name, new Date(shown)) })) : []),
-    [shown, selected],
-  );
+  const trackNote = (name: string) => {
+    const track = tracks.get(name);
+    if (!track) return trackFailed.has(name) ? "JPL's data is unavailable right now." : "Reading from JPL…";
+    const [first, last] = trackSpan(track);
+    if (name === "Titan") return null;
+    return shown < first.getTime() ? "Not launched yet on this date." : `JPL's trajectory for it runs to ${fmt(last.getTime(), { day: "2-digit", month: "short", year: "numeric" })}.`;
+  };
+  const table = useMemo(() => (shown ? BODIES.filter((b) => b.name !== "Earth").map((b) => ({ name: b.name, d: distances(b.name, new Date(shown)) })) : []), [shown]);
   const tz = place?.timeZone;
   const isTonight = shown ? fmt(shown, { day: "2-digit", month: "short", year: "numeric" }, tz) === fmt(opened, { day: "2-digit", month: "short", year: "numeric" }, tz) : true;
 
   const hide = clean ? "hidden" : "";
+  const flip = (k: keyof Layers) => setLayers((l) => ({ ...l, [k]: !l[k] }));
+  const looks = profile?.features.filter((f) => f.look) ?? [];
+  const rail: { group: string; items: string[] }[] = [
+    { group: "STAR", items: ["Sun"] },
+    { group: "PLANETS", items: ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"] },
+    { group: "DWARF PLANET", items: ["Pluto"] },
+  ];
+
+  /** The card's summary of the chosen object. */
+  const card = (() => {
+    if (info && profile && dist)
+      return (
+        <div className="p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Thumb name={info.name} size={40} />
+              <div>
+                <h2 className="display text-[22px] leading-none text-ink">{info.name}</h2>
+                <p className="mt-1.5 font-mono text-[9px] tracking-[0.18em] text-ink/45">{info.kind.toUpperCase()}</p>
+              </div>
+            </div>
+            <button type="button" onClick={() => setSelected(null)} aria-label="Back to the whole Solar System" className="rounded-full p-1.5 text-ink/50 transition-colors hover:bg-ink/10 hover:text-ink">
+              <Icon name="close" />
+            </button>
+          </div>
+          <p className="mt-4 text-[13px] leading-relaxed text-ink/65">{profile.tagline}.</p>
+          <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4">
+            <Stat label="FROM EARTH" value={dist.earthAu === null ? "You are here" : kmText(dist.earthAu * AU_KM)} sub={dist.lightS === null ? undefined : `light ${lightTime(dist.lightS)}`} accent />
+            <Stat label="FROM THE SUN" value={dist.sunAu === null ? "—" : auText(dist.sunAu)} />
+            <Stat label="DIAMETER" value={`${info.diameterKm.toLocaleString("en")} km`} />
+            <Stat label={info.name === "Sun" ? "ONE TURN" : "DAY"} value={dayText(info.dayHours)} />
+          </div>
+          {looks.length > 0 && !trueScale && (
+            <div className="mt-5">
+              <p className="font-mono text-[9px] tracking-[0.2em] text-ink/40">SEE IN 3D</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {looks.map((f) => (
+                  <button
+                    key={f.title}
+                    type="button"
+                    onClick={() => showFeature(f.look!, info.name)}
+                    className="rounded-full border border-gold/45 px-3 py-1.5 text-[12px] text-gold transition-colors hover:bg-gold hover:text-void"
+                  >
+                    {f.look === "north" && info.name === "Saturn" ? "The hexagon" : f.look === "north" && info.name === "Jupiter" ? "Polar cyclones" : LOOK_LABEL[f.look!]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {MOONS.some((m) => m.parent === info.name) && (
+            <div className="mt-5">
+              <p className="font-mono text-[9px] tracking-[0.2em] text-ink/40">{trueScale ? "MOONS · OFF AT TRUE SCALE" : "MOONS"}</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {MOONS.filter((m) => m.parent === info.name).map((m) => (
+                  <button key={m.name} type="button" onClick={() => setSelected(m.name)} className="flex items-center gap-1.5 rounded-full border border-ink/15 py-1 pl-1 pr-2.5 text-[12px] text-ink/75 transition-colors hover:border-ink/50 hover:text-ink">
+                    <Thumb name={m.name} size={16} />
+                    {m.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <button type="button" onClick={toProfile} className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-ink py-2.5 text-[13px] font-medium text-void transition-colors hover:bg-gold">
+            Full profile of {info.name}
+            <Icon name="down" />
+          </button>
+        </div>
+      );
+    if (moon)
+      return (
+        <div className="p-5">
+          <button type="button" onClick={() => setSelected(moon.parent)} className="font-mono text-[10px] tracking-[0.2em] text-gold hover:underline">
+            ← {moon.parent.toUpperCase()}
+          </button>
+          <div className="mt-4 flex items-center gap-3">
+            <Thumb name={moon.name} size={40} />
+            <div>
+              <h2 className="display text-[22px] leading-none text-ink">{moon.name}</h2>
+              <p className="mt-1.5 font-mono text-[9px] tracking-[0.18em] text-ink/45">{moon.name === "Moon" ? "EARTH'S MOON" : `MOON OF ${moon.parent.toUpperCase()}`}</p>
+            </div>
+          </div>
+          <p className="mt-4 text-[13px] leading-relaxed text-ink/65">{moon.note}</p>
+          <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4">
+            <Stat label={`FROM ${moon.parent.toUpperCase()}`} value={`${moon.distanceKm.toLocaleString("en")} km`} accent />
+            <Stat label="DIAMETER" value={`${moon.diameterKm.toLocaleString("en")} km`} />
+            <Stat label="ONE ORBIT" value={dayText(Math.abs(moon.periodDays) * 24)} sub={moon.periodDays < 0 ? "backwards" : undefined} />
+            {objectDist && <Stat label="FROM EARTH" value={kmText(objectDist.earthAu * AU_KM)} />}
+          </div>
+          {moon.source === "mean" && <p className="mt-4 text-[11px] leading-relaxed text-ink/40">Real orbit and period; its place along the orbit is approximate.</p>}
+          {moon.name === "Titan" && !tracks.get("Titan") && <p className="mt-4 text-[11px] text-ink/45">{trackFailed.has("Titan") ? "Its position from JPL is unavailable right now." : "Reading its position from JPL…"}</p>}
+          <button type="button" onClick={toProfile} className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-ink py-2.5 text-[13px] font-medium text-void transition-colors hover:bg-gold">
+            More about {moon.name}
+            <Icon name="down" />
+          </button>
+        </div>
+      );
+    if (craft)
+      return (
+        <div className="p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="display text-[22px] leading-none text-ink">{craft.name}</h2>
+              <p className="mt-1.5 font-mono text-[9px] tracking-[0.18em] text-ink/45">SPACECRAFT · LAUNCHED {craft.launched.slice(0, 4)}</p>
+            </div>
+            <button type="button" onClick={() => setSelected(null)} aria-label="Back to the whole Solar System" className="rounded-full p-1.5 text-ink/50 hover:bg-ink/10 hover:text-ink">
+              <Icon name="close" />
+            </button>
+          </div>
+          <p className="mt-4 text-[13px] leading-relaxed text-ink/65">{craft.note}</p>
+          {objectDist ? (
+            <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4">
+              <Stat label="FROM EARTH" value={kmText(objectDist.earthAu * AU_KM)} sub={`signal ${lightTime(objectDist.earthAu * AU_LIGHT_S)}`} accent />
+              {craftSpeed !== null && <Stat label="SPEED" value={`${craftSpeed.toFixed(1)} km/s`} />}
+            </div>
+          ) : (
+            <p className="mt-4 text-[12px] text-gold">{trackNote(craft.name)}</p>
+          )}
+        </div>
+      );
+    if (selected === "asteroid" && rock)
+      return (
+        <div className="p-5">
+          <h2 className="display text-[22px] leading-none text-ink">{rock.name}</h2>
+          <p className="mt-1.5 font-mono text-[9px] tracking-[0.18em] text-ink/45">
+            ASTEROID · {rock.el.orbitClass.toUpperCase()}
+            {rock.el.pha ? " · POTENTIALLY HAZARDOUS CLASS" : ""}
+          </p>
+          {objectDist && (
+            <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4">
+              <Stat label="FROM EARTH" value={kmText(objectDist.earthAu * AU_KM)} sub={`${((objectDist.earthAu * AU_KM) / 384_400).toFixed(1)} × the Moon's distance`} accent />
+              <Stat label="FROM THE SUN" value={auText(objectDist.sunAu)} />
+            </div>
+          )}
+          {objectDist && objectDist.earthAu < 0.05 && !trueScale && (
+            <p className="mt-4 text-[11px] leading-relaxed text-ink/45">So close to Earth that at this scale it sits inside Earth&apos;s enlarged globe; the glow marks it.</p>
+          )}
+        </div>
+      );
+    return (
+      <div className="p-5">
+        <p className="font-mono text-[9px] tracking-[0.2em] text-ink/45">RIGHT NOW · {shown ? fmt(shown, { day: "2-digit", month: "short", year: "numeric" }) : ""}</p>
+        <h2 className="display mt-2 text-[22px] text-ink">Where they are</h2>
+        <p className="mt-2 text-[13px] leading-relaxed text-ink/55">Distance from Earth, and how long each one&apos;s light takes to reach us.</p>
+        <ul className="mt-4 divide-y divide-ink/[0.08]">
+          {table.map(({ name, d }) => (
+            <li key={name}>
+              <button type="button" onClick={() => setSelected(name)} className="flex w-full items-center gap-3 py-2.5 text-left transition-colors hover:text-gold">
+                <Thumb name={name} size={18} ring={false} />
+                <span className="flex-1 text-[13px] text-ink/90">{name}</span>
+                <span className="text-right font-mono text-[10px] tracking-[0.04em] text-ink/45">{d.earthAu !== null && `${auText(d.earthAu)} · ${lightTime(d.lightS!)}`}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-5 font-mono text-[9px] tracking-[0.2em] text-ink/40">SPACECRAFT</p>
+        <ul className="mt-1 divide-y divide-ink/[0.08]">
+          {CRAFT.map((c) => {
+            const d = shown ? away(c.name, shown) : null;
+            return (
+              <li key={c.name}>
+                <button type="button" onClick={() => setSelected(c.name)} className="flex w-full items-center gap-3 py-2.5 text-left transition-colors hover:text-[#7fd4ff]">
+                  <span className="block h-1.5 w-1.5 rounded-full bg-[#7fd4ff] shadow-[0_0_8px_#7fd4ff]" />
+                  <span className="flex-1 text-[13px] text-ink/90">{c.name}</span>
+                  <span className="text-right font-mono text-[10px] text-ink/45">{d ? auText(d.earthAu) : trackFailed.has(c.name) ? "unavailable" : tracks.get(c.name) ? "not in flight" : "…"}</span>
+                </button>
+              </li>
+            );
+          })}
+          {rock && (
+            <li>
+              <button type="button" onClick={() => setSelected("asteroid")} className="flex w-full items-center gap-3 py-2.5 text-left text-[#ff8a4c] hover:text-ink">
+                <span className="block h-1.5 w-1.5 rounded-full bg-[#ff8a4c]" />
+                <span className="flex-1 truncate text-[13px]">{rock.name}</span>
+                <span className="font-mono text-[10px]">asteroid</span>
+              </button>
+            </li>
+          )}
+        </ul>
+      </div>
+    );
+  })();
 
   return (
-    <main className={`relative min-h-svh bg-void text-ink lg:h-svh lg:overflow-hidden ${clean ? "h-svh overflow-hidden" : ""}`}>
-      <div className={`relative w-full lg:absolute lg:inset-0 lg:h-full ${clean ? "h-svh" : "h-[58svh]"}`}>
-        <Scene
-          clock={clock}
+    <main className="relative bg-void text-ink">
+      <section ref={stage} className={`relative w-full overflow-hidden ${clean ? "h-svh" : "h-[72svh] lg:h-svh"} min-h-[520px]`}>
+        <div className="absolute inset-0">
+          <Scene
+            clock={clock}
+            selected={selected}
+            onSelect={setSelected}
+            trueScale={trueScale}
+            tracks={tracks}
+            swarm={hazard === "on" ? swarm : null}
+            rock={rock}
+            look={look}
+            reducedMotion={reducedMotion}
+            layers={layers}
+            fill={fill}
+            active={onStage}
+            panelShift={clean ? 0 : 150}
+          />
+        </div>
+        {/* Shade at top and bottom, so the bars read over bright planets. */}
+        <div aria-hidden className={`pointer-events-none absolute inset-x-0 top-0 h-36 bg-gradient-to-b from-black/80 to-transparent ${hide}`} />
+        <div aria-hidden className={`pointer-events-none absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-black/85 to-transparent ${hide}`} />
+
+        {/* Top bar. */}
+        <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-3 px-4 py-4 sm:px-6">
+          <div className={`pointer-events-auto flex min-w-0 items-center gap-3 sm:gap-4 ${hide}`}>
+            <Link href="/" aria-label="Back to Stellr" className="font-mono text-[11px] tracking-[0.2em] text-ink/60 transition-colors hover:text-gold">
+              <span className="sm:hidden">←</span>
+              <span className="hidden sm:inline">
+                <ScrambleText text="← STELLR" />
+              </span>
+            </Link>
+            <span className="hidden h-5 w-px bg-ink/20 sm:block" />
+            <div className="min-w-0">
+              <h1 className="truncate font-sans text-[13px] font-semibold tracking-[0.22em] text-ink sm:text-[15px] sm:tracking-[0.32em]">COSMOSCOPE</h1>
+              <p className="hidden truncate text-[11px] text-ink/50 md:block">Every planet, moon and spacecraft, where it really is.</p>
+            </div>
+          </div>
+          <div className="pointer-events-auto ml-auto flex items-center gap-2">
+            <div className={`hidden rounded-full border border-ink/15 bg-black/40 p-0.5 backdrop-blur-md sm:flex ${hide}`}>
+              {[false, true].map((t) => (
+                <button
+                  key={String(t)}
+                  type="button"
+                  aria-pressed={trueScale === t}
+                  onClick={() => setTrueScale(t)}
+                  className={`rounded-full px-3.5 py-1.5 text-[12px] transition-colors ${trueScale === t ? "bg-ink text-void" : "text-ink/65 hover:text-ink"}`}
+                >
+                  {t ? "True scale" : "Scaled view"}
+                </button>
+              ))}
+            </div>
+            <div ref={menuRef} className={`relative ${hide}`}>
+              <button
+                type="button"
+                aria-expanded={menu}
+                onClick={() => setMenu(!menu)}
+                className={`flex items-center gap-2 rounded-full border px-3.5 py-2 text-[12px] backdrop-blur-md transition-colors ${menu ? "border-ink bg-ink text-void" : "border-ink/20 bg-black/40 text-ink/85 hover:border-ink/50"}`}
+              >
+                <Icon name="layers" />
+                <span className="hidden sm:inline">Layers</span>
+              </button>
+              {menu && (
+                <div className={`${glass} absolute right-0 top-full mt-2 w-[290px] p-2`}>
+                  <div className="sm:hidden">
+                    <Toggle label="True scale" note="Real distances and sizes" on={trueScale} onChange={() => setTrueScale(!trueScale)} />
+                  </div>
+                  <Toggle label="Orbits" on={layers.orbits} onChange={() => flip("orbits")} />
+                  <Toggle label="Labels" note="Names and landmarks" on={layers.labels} onChange={() => flip("labels")} />
+                  <Toggle label="Moons" note="Twenty of the largest" on={layers.moons} onChange={() => flip("moons")} />
+                  <Toggle label="Spacecraft" note="Voyagers, New Horizons, Parker" on={layers.craft} onChange={() => flip("craft")} tone="bg-[#7fd4ff]" />
+                  <Toggle label="Earth's plates" note="Tectonic plate boundaries" on={layers.plates} onChange={() => flip("plates")} tone="bg-[#ff6f3c]" />
+                  <Toggle
+                    label="Hazardous asteroids"
+                    note={hazard === "loading" ? "Reading JPL's orbits…" : hazard === "error" ? "Unavailable right now" : hazard === "on" ? `${Math.floor((swarm?.orbits.length ?? 0) / (swarm?.stride ?? 1)).toLocaleString("en")} on their real orbits` : "Every known one, from JPL"}
+                    on={hazard === "on"}
+                    onChange={toggleHazard}
+                    tone="bg-[#ff6a3d]"
+                  />
+                  <div className="my-1 h-px bg-ink/10" />
+                  <Toggle label="Light the night side" note="See surfaces in shadow" on={fill} onChange={() => setFill(!fill)} />
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setClean(!clean)}
+              title={clean ? "Show the panels (H or Esc)" : "Hide the panels (H)"}
+              className="flex items-center gap-2 rounded-full border border-ink/20 bg-black/40 px-3.5 py-2 text-[12px] text-ink/85 backdrop-blur-md transition-colors hover:border-ink/50"
+            >
+              <Icon name={clean ? "eye" : "eye-off"} />
+              <span className="hidden sm:inline">{clean ? "Show panels" : "Hide panels"}</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Bodies, down the left on wide screens; a strip along the bottom on phones. */}
+        <nav aria-label="Bodies" className={`absolute left-4 top-20 z-10 hidden w-[200px] lg:block ${hide}`}>
+          <div className={`${glass} cosmo-scroll max-h-[calc(100svh-15rem)] overflow-y-auto p-2`}>
+            {rail.map((g) => (
+              <div key={g.group} className="mb-1">
+                <p className="px-2.5 pb-1 pt-2 font-mono text-[9px] tracking-[0.2em] text-ink/35">{g.group}</p>
+                {g.items.map((name) => {
+                  const on = selected === name || (isMoon(selected) && MOONS.find((m) => m.name === selected)?.parent === name);
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setSelected(selected === name ? null : name)}
+                      className={`flex w-full items-center gap-3 rounded-xl px-2.5 py-1.5 text-left text-[13px] transition-colors ${on ? "bg-ink/[0.09] text-ink" : "text-ink/70 hover:bg-ink/[0.05] hover:text-ink"}`}
+                    >
+                      <Thumb name={name} size={22} />
+                      {name}
+                      {on && <span className="ml-auto block h-1.5 w-1.5 rounded-full bg-gold" />}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </nav>
+        <nav aria-label="Bodies" className={`cosmo-scroll absolute inset-x-0 bottom-3 z-10 flex gap-2 overflow-x-auto px-4 lg:hidden ${hide}`}>
+          {rail.flatMap((g) => g.items).map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => setSelected(selected === name ? null : name)}
+              className={`flex shrink-0 items-center gap-2 rounded-full border py-1 pl-1 pr-3 text-[12px] backdrop-blur-md transition-colors ${selected === name ? "border-gold/70 bg-black/60 text-ink" : "border-ink/15 bg-black/45 text-ink/75"}`}
+            >
+              <Thumb name={name} size={20} ring={false} />
+              {name}
+            </button>
+          ))}
+        </nav>
+
+        {/* Summary of the chosen object, on the right on wide screens. */}
+        <aside className={`absolute right-4 top-20 z-10 hidden w-[340px] lg:block ${hide}`}>
+          <div className={`${glass} cosmo-scroll max-h-[calc(100svh-15rem)] overflow-y-auto`}>{card}</div>
+          {trueScale && <p className="mt-3 px-2 text-[11px] leading-relaxed text-gold/90">True scale: distances and sizes in proportion. Dots mark the planets; at this scale even Jupiter is a speck.</p>}
+        </aside>
+
+        {/* Time, along the bottom on wide screens. */}
+        <div className={`absolute bottom-4 left-[232px] right-[372px] z-10 hidden lg:block ${hide}`}>
+          <Timeline shown={shown} today={today} mode={mode} reverse={reverse} presets={presets} onLive={goLive} onRate={(r) => setRate(r)} onReverse={() => {
+            setReverse(!reverse);
+            if (!mode.live && mode.rate) setRate(mode.rate, !reverse);
+          }} onJump={jump} />
+        </div>
+
+        {clean && (
+          <p className="pointer-events-none absolute inset-x-0 bottom-5 text-center font-mono text-[10px] tracking-[0.2em] text-ink/40">
+            {shown ? `${fmt(shown, { day: "2-digit", month: "short", year: "numeric" }, "UTC")} · ` : ""}DRAG TO TURN · SCROLL TO ZOOM · <span className="hidden sm:inline">H OR ESC</span>
+            <span className="sm:hidden">TAP SHOW PANELS</span> TO BRING THE PANELS BACK
+          </p>
+        )}
+      </section>
+
+      {/* On phones and tablets, the time bar and summary sit under the scene. */}
+      <div className={`space-y-4 px-4 pt-4 lg:hidden ${hide}`}>
+        <Timeline shown={shown} today={today} mode={mode} reverse={reverse} presets={presets} onLive={goLive} onRate={(r) => setRate(r)} onReverse={() => {
+          setReverse(!reverse);
+          if (!mode.live && mode.rate) setRate(mode.rate, !reverse);
+        }} onJump={jump} />
+        <div className={glass}>{card}</div>
+      </div>
+
+      <div id="profile" className="scroll-mt-0">
+        <Dossier
           selected={selected}
-          onSelect={setSelected}
-          trueScale={trueScale}
-          tracks={tracks}
-          swarm={hazard === "on" ? swarm : null}
-          rock={rock}
-          look={look}
-          reducedMotion={reducedMotion}
+          shown={shown}
+          dist={dist}
+          sky={sky}
+          placeState={placeState}
+          isTonight={isTonight}
+          away={away}
+          onSelect={choose}
+          onLook={(f, body) => {
+            showFeature(f.look!, body);
+            toTop();
+          }}
+          trackNote={trackNote}
+          craftSpeed={craftSpeed}
+          rockName={rock?.name ?? null}
         />
       </div>
 
-      {/* A soft shade behind the title, so it stays readable when a planet drifts behind it. */}
-      <div
-        aria-hidden
-        className={`pointer-events-none absolute left-0 top-0 hidden h-[340px] w-[680px] ${clean ? "" : "sm:block"}`}
-        style={{ background: "radial-gradient(ellipse at 0% 0%, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.45) 45%, transparent 72%)" }}
-      />
-      <header className="pointer-events-none absolute inset-x-0 top-0 flex flex-wrap items-start justify-between gap-4 p-5 sm:flex-nowrap sm:p-8">
-        <div className={`pointer-events-auto ${hide}`}>
-          <Link href="/" className="font-mono text-[11px] tracking-[0.2em] text-ink/60 transition-colors hover:text-gold">
-            <ScrambleText text="← STELLR" />
-          </Link>
-          <h1 className="display mt-5 text-[clamp(1.6rem,3vw,2.8rem)] text-ink">Cosmoscope</h1>
-          <p className="caps mt-2 max-w-[34ch] text-[11px] text-ink/60 sm:text-[12px]">Every planet, moon and spacecraft, where it really is.</p>
-          <p className="mt-3 hidden font-mono text-[10px] tracking-[0.18em] text-ink/40 lg:block">CLICK A NAME TO FLY THERE · DRAG TO TURN · SCROLL TO ZOOM</p>
-        </div>
-        <div className={`pointer-events-auto flex flex-wrap gap-2 sm:max-w-[60%] sm:justify-end ${clean ? "ml-auto" : ""}`}>
-          <button
-            type="button"
-            aria-pressed={clean}
-            title={clean ? "Bring back the panels (H or Esc)" : "Hide the panels and see only the solar system (H)"}
-            onClick={() => setClean(!clean)}
-            className={chip(clean)}
-          >
-            {clean ? "SHOW PANELS" : "HIDE PANELS"}
-          </button>
-          <button
-            type="button"
-            aria-pressed={trueScale}
-            title="Show distances and sizes in their true proportions"
-            onClick={() => setTrueScale(!trueScale)}
-            className={`${chip(trueScale)} ${hide}`}
-          >
-            TRUE SCALE
-          </button>
-          <button
-            type="button"
-            aria-pressed={hazard === "on"}
-            title="Show every known potentially hazardous asteroid"
-            onClick={toggleHazard}
-            className={`${chip(hazard === "on", "border-[#ff6a3d] bg-[#ff6a3d] text-void")} ${hide}`}
-          >
-            {hazard === "loading" ? "HAZARDOUS…" : "HAZARDOUS"}
-          </button>
-        </div>
-      </header>
-
-      {/* Time controls: over the scene on wide screens, under it on phones. */}
-      <section
-        aria-label="Time"
-        className={`relative z-10 px-5 pt-4 sm:px-8 lg:absolute lg:bottom-8 lg:left-8 lg:right-[436px] lg:p-0 ${hide}`}
-      >
-        <div className="frame bg-void/70 p-4 backdrop-blur-md">
-          <p className="font-mono text-[9px] tracking-[0.2em] text-ink/40">THE MOMENT SHOWN</p>
-          <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 font-mono">
-            <p className="text-sm tracking-[0.14em] text-ink tabular-nums">
-              {shown ? fmt(shown, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }, "UTC") : "—"} UTC
-            </p>
-            <p className="text-[10px] tracking-[0.18em] text-ink/45">
-              {mode.live ? (
-                <>
-                  <span className="text-gold">●</span> LIVE · REAL TIME
-                </>
-              ) : mode.rate ? (
-                `${reverse ? "REWINDING" : "PLAYING"} · ${SPEEDS.find(([, r]) => r === mode.rate)?.[2] ?? ""}`
-              ) : (
-                "PAUSED · PRESS NOW TO RETURN"
-              )}
-            </p>
-          </div>
-          <label htmlFor="cosmo-time" className="sr-only">
-            Days from today
-          </label>
-          <input
-            id="cosmo-time"
-            type="range"
-            min={-SLIDER_DAYS}
-            max={SLIDER_DAYS}
-            step={1}
-            value={sliderDays}
-            onChange={(e) => jump(today + Number(e.target.value) * DAY_MS + 12 * 3_600_000)}
-            className="mt-3 w-full accent-[#c9a46a]"
-          />
-          <div className="mt-1 flex justify-between font-mono text-[9px] tracking-[0.16em] text-ink/35">
-            <span>10 YEARS AGO</span>
-            <span>TODAY</span>
-            <span>10 YEARS AHEAD</span>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={goLive}
-              className={`rounded-full border px-3 py-1 font-mono text-[10px] tracking-[0.18em] transition-colors ${
-                mode.live ? "border-gold bg-gold text-void" : "border-ink/25 text-ink/70 hover:border-ink/60"
-              }`}
-            >
-              NOW
-            </button>
-            <button
-              type="button"
-              onClick={() => setRate(0)}
-              aria-label="Pause"
-              className={`rounded-full border px-3 py-1 font-mono text-[10px] tracking-[0.18em] transition-colors ${
-                !mode.live && !mode.rate ? "border-gold bg-gold text-void" : "border-ink/25 text-ink/70 hover:border-ink/60"
-              }`}
-            >
-              PAUSE
-            </button>
-            {SPEEDS.map(([label, rate]) => (
-              <button
-                key={label}
-                type="button"
-                onClick={() => setRate(rate)}
-                className={`rounded-full border px-3 py-1 font-mono text-[10px] tracking-[0.18em] transition-colors ${
-                  !mode.live && mode.rate === rate ? "border-gold bg-gold text-void" : "border-ink/25 text-ink/70 hover:border-ink/60"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-            <button
-              type="button"
-              aria-pressed={reverse}
-              onClick={() => {
-                setReverse(!reverse);
-                if (!mode.live && mode.rate) setRate(mode.rate, !reverse);
-              }}
-              className={`rounded-full border px-3 py-1 font-mono text-[10px] tracking-[0.18em] transition-colors ${
-                reverse ? "border-ink/80 bg-ink text-void" : "border-ink/25 text-ink/70 hover:border-ink/60"
-              }`}
-            >
-              ⇄ REWIND
-            </button>
-            <label htmlFor="cosmo-date" className="sr-only">
-              Go to date
-            </label>
-            <input
-              id="cosmo-date"
-              type="date"
-              min="1900-01-01"
-              max="2199-12-31"
-              value={shown ? new Date(shown).toISOString().slice(0, 10) : ""}
-              onChange={(e) => {
-                const t = Date.parse(`${e.target.value}T12:00:00Z`);
-                if (Number.isFinite(t)) jump(t);
-              }}
-              className="h-7 rounded-full border border-ink/25 bg-void px-3 font-mono text-[10px] tracking-[0.12em] text-ink outline-none [color-scheme:dark] focus:border-ink/60"
-            />
-          </div>
-          <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 font-mono text-[10px] tracking-[0.16em]">
-            <span className="text-[9px] tracking-[0.2em] text-ink/40">JUMP TO</span>
-            {presets.map((p) => (
-              <button key={p.label} type="button" onClick={() => jump(p.t, p.body)} className="text-left text-ink/55 transition-colors hover:text-gold">
-                → {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <aside className={`relative z-10 px-5 pb-10 pt-4 sm:px-8 lg:absolute lg:bottom-8 lg:right-8 lg:top-28 lg:w-[388px] lg:overflow-y-auto lg:overflow-x-hidden lg:p-[4px] ${hide}`}>
-        <div className="frame bg-void/70 backdrop-blur-md">
-          {info && dist ? (
-            <div className="p-5">
-              <button type="button" onClick={() => setSelected(null)} className="font-mono text-[10px] tracking-[0.2em] text-gold hover:underline">
-                ← WHOLE SOLAR SYSTEM
-              </button>
-              <h2 className="display mt-4 text-2xl text-ink">{info.name}</h2>
-              <p className="mt-1 font-mono text-[10px] tracking-[0.16em] text-ink/45">{info.kind.toUpperCase()}</p>
-              <p className="mt-3 text-[13px] leading-relaxed text-ink/70">{info.about}</p>
-
-              <dl className="mt-5 grid grid-cols-2 gap-4 font-mono">
-                {dist.earthAu !== null ? (
-                  <div className="col-span-2">
-                    <dt className="text-[10px] tracking-[0.2em] text-ink/45">FROM EARTH</dt>
-                    <dd className="mt-1 text-sm text-gold">{kmText(dist.earthAu)}</dd>
-                    <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">
-                      {auText(dist.earthAu)} · ITS LIGHT TAKES {lightTime(dist.lightS!)} TO REACH US
-                    </dd>
-                  </div>
-                ) : (
-                  <div className="col-span-2">
-                    <dt className="text-[10px] tracking-[0.2em] text-ink/45">FROM EARTH</dt>
-                    <dd className="mt-1 text-sm text-gold">YOU ARE HERE</dd>
-                  </div>
-                )}
-                {dist.sunAu !== null && (
-                  <div className="col-span-2">
-                    <dt className="text-[10px] tracking-[0.2em] text-ink/45">FROM THE SUN</dt>
-                    <dd className="mt-1 text-sm text-ink">{kmText(dist.sunAu)}</dd>
-                    <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">
-                      {auText(dist.sunAu)} · SUNLIGHT TAKES {lightTime(dist.sunAu * 499.004784)} TO GET THERE
-                    </dd>
-                  </div>
-                )}
-                <div>
-                  <dt className="text-[10px] tracking-[0.2em] text-ink/45">{info.name === "Sun" ? "ONE TURN" : "LENGTH OF A DAY"}</dt>
-                  <dd className="mt-1 text-sm text-ink">{dayText(info.dayHours)}</dd>
-                  <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">
-                    {info.name === "Sun" ? "AT ITS EQUATOR" : info.spinHours < 0 ? "SUNRISE TO SUNRISE · SPINS BACKWARDS" : "SUNRISE TO SUNRISE"}
-                  </dd>
-                </div>
-                {info.yearDays > 0 && (
-                  <div>
-                    <dt className="text-[10px] tracking-[0.2em] text-ink/45">LENGTH OF A YEAR</dt>
-                    <dd className="mt-1 text-sm text-ink">{yearText(info.yearDays)}</dd>
-                    <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">ONE LAP OF THE SUN</dd>
-                  </div>
-                )}
-                <div>
-                  <dt className="text-[10px] tracking-[0.2em] text-ink/45">DIAMETER</dt>
-                  <dd className="mt-1 text-sm text-ink">{info.diameterKm.toLocaleString("en")} KM</dd>
-                  {info.name !== "Earth" && (
-                    <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">
-                      {(info.diameterKm / 12_756).toFixed(info.diameterKm < 12_756 ? 2 : 1)} × EARTH
-                    </dd>
-                  )}
-                </div>
-                <div>
-                  <dt className="text-[10px] tracking-[0.2em] text-ink/45">{info.name === "Sun" ? "SURFACE TEMPERATURE" : "AVERAGE TEMPERATURE"}</dt>
-                  <dd className="mt-1 text-sm text-ink">{info.tempC.toLocaleString("en")} °C</dd>
-                </div>
-                {info.name !== "Sun" && (
-                  <div>
-                    <dt className="text-[10px] tracking-[0.2em] text-ink/45">KNOWN MOONS</dt>
-                    <dd className="mt-1 text-sm text-ink">{info.moons}</dd>
-                  </div>
-                )}
-                <div>
-                  <dt className="text-[10px] tracking-[0.2em] text-ink/45">AXIAL TILT</dt>
-                  <dd className="mt-1 text-sm text-ink">{info.tilt}°</dd>
-                  <dd className="mt-0.5 text-[10px] tracking-[0.12em] text-ink/50">{info.tilt > 90 ? "TURNED OVER: IT SPINS BACKWARDS" : "LEAN OF ITS SPIN AXIS"}</dd>
-                </div>
-              </dl>
-
-              {(info.name === "Jupiter" || info.name === "Saturn") && !trueScale && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    // The storm may be on the night side: run the clock on (under ten hours) until it turns into daylight.
-                    if (info.name === "Jupiter") {
-                      const lit = stormInDaylight(new Date(clock.current.t)).getTime();
-                      if (lit !== clock.current.t) jump(lit);
-                    }
-                    setLook({ kind: info.name === "Jupiter" ? "storm" : "rings", n: Date.now() });
-                  }}
-                  className="mt-5 rounded-full border border-gold/60 px-4 py-2 font-mono text-[10px] tracking-[0.2em] text-gold transition-colors hover:bg-gold hover:text-void"
-                >
-                  {info.name === "Jupiter" ? "FACE THE GREAT RED SPOT →" : "SEE THE RINGS FROM ABOVE →"}
-                </button>
-              )}
-              {info.name === "Jupiter" && (
-                <p className="caps mt-3 text-[11px] leading-relaxed text-ink/55">
-                  The Great Red Spot is a storm wider than Earth that has raged for at least 150 years. Jupiter turns once in under ten hours, carrying it round; the button moves time on to when it is in daylight. Its longitude here is approximate.
-                </p>
-              )}
-              {info.name === "Saturn" && (
-                <p className="caps mt-3 text-[11px] leading-relaxed text-ink/55">
-                  The rings are 280,000 km across but mostly only tens of metres thick: ice and rock, lit here by the Sun, with Saturn&apos;s shadow falling across them.
-                </p>
-              )}
-
-              {MOONS.some((m) => m.parent === info.name) && (
-                <div className="mt-5">
-                  <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">{trueScale ? "MOONS · SWITCH OFF TRUE SCALE TO SEE THEM" : "ITS MOONS ON THE MAP · CHOOSE ONE TO FLY THERE"}</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {MOONS.filter((m) => m.parent === info.name).map((m) => (
-                      <button
-                        key={m.name}
-                        type="button"
-                        onClick={() => setSelected(m.name)}
-                        className="rounded-full border border-ink/25 px-3 py-1 font-mono text-[10px] tracking-[0.18em] text-ink/75 transition-colors hover:border-ink/60 hover:text-ink"
-                      >
-                        {m.name.toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {sky && (
-                <div className="mt-6 border-t border-ink/10 pt-5">
-                  <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">
-                    CAN YOU SEE IT? · {isTonight ? "TONIGHT" : `NIGHT OF ${fmt(shown, { day: "2-digit", month: "short", year: "numeric" }, tz)}`} FROM {place?.name.toUpperCase()}
-                  </p>
-                  <p className="caps mt-2 text-[12px] leading-relaxed text-ink/80">
-                    {sky.kind === "visible"
-                      ? `Yes. It is up from ${fmt(sky.from.getTime(), { hour: "2-digit", minute: "2-digit" }, tz)} to ${fmt(sky.until.getTime(), { hour: "2-digit", minute: "2-digit" }, tz)}; best around ${fmt(sky.best.getTime(), { hour: "2-digit", minute: "2-digit" }, tz)}, ${Math.round(sky.altitude)}° above the horizon in the ${sky.direction}, shining at magnitude ${sky.magnitude.toFixed(1)}${sky.magnitude < 0 ? ", brighter than almost every star" : ""}.`
-                      : sky.kind === "glare"
-                        ? `No. It sits only ${Math.round(sky.elongation)}° from the Sun in the sky, lost in its glare.`
-                        : sky.kind === "below"
-                          ? "No. It stays below the horizon all night from here."
-                          : "No proper night at this latitude on this date: the Sun never sets far enough."}
-                  </p>
-                  {(selected === "Uranus" || selected === "Neptune" || selected === "Pluto") && sky.kind === "visible" && (
-                    <p className="mt-1 font-mono text-[10px] tracking-[0.12em] text-ink/45">
-                      {selected === "Uranus"
-                        ? "AT THE EDGE OF NAKED-EYE SIGHT; BINOCULARS HELP."
-                        : selected === "Pluto"
-                          ? "FAR TOO FAINT FOR THE EYE: IT TAKES A LARGE TELESCOPE AND A DARK SKY."
-                          : "TOO FAINT FOR THE EYE; NEEDS A TELESCOPE."}
-                    </p>
-                  )}
-                  <div className="mt-4">
-                    <PlacePicker state={placeState} />
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : moon ? (
-            <div className="p-5">
-              <button type="button" onClick={() => setSelected(moon.parent)} className="font-mono text-[10px] tracking-[0.2em] text-gold hover:underline">
-                ← {moon.parent.toUpperCase()}
-              </button>
-              <h2 className="display mt-4 text-2xl text-ink">{moon.name}</h2>
-              <p className="mt-1 font-mono text-[10px] tracking-[0.16em] text-ink/45">MOON OF {moon.parent.toUpperCase()}</p>
-              <dl className="mt-5 grid grid-cols-2 gap-4 font-mono">
-                <Fact wide label={`FROM ${moon.parent.toUpperCase()}`} value={`${moon.distanceKm.toLocaleString("en")} KM`} sub="ON AVERAGE" accent />
-                {objectDist && moon.parent !== "Earth" && (
-                  <Fact wide label="FROM EARTH" value={kmText(objectDist.earthAu)} sub={`ITS LIGHT TAKES ${lightTime(objectDist.earthAu * AU_LIGHT_S)} TO REACH US`} />
-                )}
-                {moon.parent === "Earth" && objectDist && (
-                  <Fact wide label="FROM EARTH RIGHT NOW" value={`${Math.round(objectDist.earthAu * AU_KM).toLocaleString("en")} KM`} sub={`MOONLIGHT TAKES ${lightTime(objectDist.earthAu * AU_LIGHT_S)} TO REACH US`} />
-                )}
-                <Fact label="ONE ORBIT" value={dayText(moon.periodDays * 24)} sub={`ONE LAP OF ${moon.parent.toUpperCase()}`} />
-                <Fact label="DIAMETER" value={`${moon.diameterKm.toLocaleString("en")} KM`} sub={`${(moon.diameterKm / 3475).toFixed(2)} × OUR MOON`} />
-              </dl>
-              <p className="caps mt-4 text-[11px] leading-relaxed text-ink/55">
-                {moon.note}
-                {moon.name === "Titan" && !tracks.get("Titan") && (trackFailed.has("Titan") ? " Its position from JPL is unavailable right now." : " Reading its position from JPL…")}
-              </p>
-            </div>
-          ) : craft ? (
-            <div className="p-5">
-              <button type="button" onClick={() => setSelected(null)} className="font-mono text-[10px] tracking-[0.2em] text-gold hover:underline">
-                ← WHOLE SOLAR SYSTEM
-              </button>
-              <h2 className="display mt-4 text-2xl text-ink">{craft.name}</h2>
-              <p className="mt-1 font-mono text-[10px] tracking-[0.16em] text-ink/45">
-                SPACECRAFT · LAUNCHED {fmt(Date.parse(`${craft.launched}T12:00:00Z`), { day: "2-digit", month: "short", year: "numeric" })}
-              </p>
-              {objectDist ? (
-                <dl className="mt-5 grid grid-cols-2 gap-4 font-mono">
-                  <Fact wide accent label="FROM EARTH" value={kmText(objectDist.earthAu)} sub={`${auText(objectDist.earthAu)} · A RADIO SIGNAL TAKES ${lightTime(objectDist.earthAu * AU_LIGHT_S)}`} />
-                  <Fact wide label="FROM THE SUN" value={kmText(objectDist.sunAu)} sub={auText(objectDist.sunAu)} />
-                  {craftSpeed !== null && <Fact wide label="SPEED AROUND THE SUN" value={`${craftSpeed.toFixed(1)} KM/S`} sub={`${Math.round(craftSpeed * 3600).toLocaleString("en")} KM/H`} />}
-                </dl>
-              ) : (
-                <p className="caps mt-5 text-[11px] leading-relaxed text-gold">
-                  {(() => {
-                    const track = tracks.get(craft.name);
-                    if (!track) return trackFailed.has(craft.name) ? "JPL's trajectory is unavailable right now." : "Reading its trajectory from JPL…";
-                    const [first, last] = trackSpan(track);
-                    return shown < first.getTime()
-                      ? "Not launched yet on this date."
-                      : `JPL's trajectory for it runs to ${fmt(last.getTime(), { day: "2-digit", month: "short", year: "numeric" })}.`;
-                  })()}
-                </p>
-              )}
-              <p className="caps mt-4 text-[11px] leading-relaxed text-ink/55">{craft.note}</p>
-            </div>
-          ) : selected === "asteroid" && rock ? (
-            <div className="p-5">
-              <button type="button" onClick={() => setSelected(null)} className="font-mono text-[10px] tracking-[0.2em] text-gold hover:underline">
-                ← WHOLE SOLAR SYSTEM
-              </button>
-              <h2 className="display mt-4 text-2xl text-ink">{rock.name}</h2>
-              <p className="mt-1 font-mono text-[10px] tracking-[0.16em] text-ink/45">
-                ASTEROID · {rock.el.orbitClass.toUpperCase()}
-                {rock.el.pha ? " · POTENTIALLY HAZARDOUS CLASS" : ""}
-              </p>
-              {objectDist && (
-                <dl className="mt-5 grid grid-cols-2 gap-4 font-mono">
-                  <Fact wide accent label="FROM EARTH" value={kmText(objectDist.earthAu)} sub={`${auText(objectDist.earthAu)} · ${(objectDist.earthAu * AU_KM / 384_400).toFixed(1)} × THE MOON'S DISTANCE`} />
-                  <Fact wide label="FROM THE SUN" value={kmText(objectDist.sunAu)} sub={auText(objectDist.sunAu)} />
-                  <Fact label="CLOSEST–FARTHEST FROM THE SUN" value={`${(rock.el.a * (1 - rock.el.e)).toFixed(2)}–${(rock.el.a * (1 + rock.el.e)).toFixed(2)} AU`} />
-                  <Fact label="ONE LAP OF THE SUN" value={yearText(360 / (rock.el.n ?? 0.9856 / Math.pow(rock.el.a, 1.5)))} />
-                </dl>
-              )}
-              <p className="caps mt-4 text-[11px] leading-relaxed text-ink/55">
-                {objectDist && objectDist.earthAu < 0.05 && !trueScale
-                  ? "It is passing so close to Earth that at this scale it sits inside Earth's enlarged globe; the glow marks it. Asteroid Sentinel's flyby view shows the pass properly. "
-                  : ""}
-                Its orbit from JPL, propagated in your browser: close to the truth for months around today, approximate decades away.
-              </p>
-              <Link href="/asteroid-sentinel" className="mt-4 inline-block font-mono text-[10px] tracking-[0.2em] text-gold hover:underline">
-                ASTEROID SENTINEL →
-              </Link>
-            </div>
-          ) : (
-            <div className="p-5">
-              <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">
-                THE SOLAR SYSTEM · {shown ? fmt(shown, { day: "2-digit", month: "short", year: "numeric" }) : ""}
-              </p>
-              <h2 className="display mt-3 text-2xl text-ink">Where they are</h2>
-              <p className="mt-3 text-[13px] leading-relaxed text-ink/70">
-                How far each world is from Earth at the moment shown, and how long its light takes to reach us. Choose one to fly there.
-              </p>
-              <p className="mt-5 font-mono text-[10px] tracking-[0.2em] text-ink/45">THE SUN, THE PLANETS AND PLUTO</p>
-              <ul className="mt-1 divide-y divide-ink/10">
-                {table.map(({ name, d }) => (
-                  <li key={name}>
-                    <button
-                      type="button"
-                      onClick={() => setSelected(name)}
-                      className="flex w-full items-baseline justify-between gap-3 py-3 text-left font-mono text-ink/85 transition-colors hover:text-gold"
-                    >
-                      <span className="text-[12px] tracking-[0.1em]">{name.toUpperCase()}</span>
-                      <span className="text-right text-[10px] tracking-[0.12em] text-ink/50">
-                        {d.earthAu !== null && `${auText(d.earthAu)} · LIGHT ${lightTime(d.lightS!)}`}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-                <li>
-                  <button
-                    type="button"
-                    onClick={() => setSelected("Earth")}
-                    className="flex w-full items-baseline justify-between gap-3 py-3 text-left font-mono text-gold transition-colors hover:text-ink"
-                  >
-                    <span className="text-[12px] tracking-[0.1em]">EARTH</span>
-                    <span className="text-[10px] tracking-[0.12em]">YOU ARE HERE</span>
-                  </button>
-                </li>
-              </ul>
-              <p className="mt-6 font-mono text-[10px] tracking-[0.2em] text-ink/45">SPACECRAFT · DISTANCE AND RADIO-SIGNAL TIME</p>
-              <ul className="mt-1 divide-y divide-ink/10">
-                {craftTable.map(({ name, d }) => (
-                  <li key={name}>
-                    <button
-                      type="button"
-                      onClick={() => setSelected(name)}
-                      className="flex w-full items-baseline justify-between gap-3 py-3 text-left font-mono text-ink/85 transition-colors hover:text-[#7fd4ff]"
-                    >
-                      <span className="text-[12px] tracking-[0.1em]">{name.toUpperCase()}</span>
-                      <span className="text-right text-[10px] tracking-[0.12em] text-ink/50">
-                        {d ? `${auText(d.earthAu)} · SIGNAL ${lightTime(d.earthAu * AU_LIGHT_S)}` : trackFailed.has(name) ? "UNAVAILABLE" : tracks.get(name) ? "NOT IN FLIGHT THEN" : "…"}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-                {rock && (
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setSelected("asteroid")}
-                      className="flex w-full items-baseline justify-between gap-3 py-3 text-left font-mono text-[#ff8a4c] transition-colors hover:text-ink"
-                    >
-                      <span className="truncate text-[12px] tracking-[0.1em]">{rock.name.toUpperCase()}</span>
-                      <span className="shrink-0 text-[10px] tracking-[0.12em]">ASTEROID</span>
-                    </button>
-                  </li>
-                )}
-              </ul>
-            </div>
-          )}
-        </div>
-
-        {trueScale && (
-          <p className="caps mt-4 text-[11px] leading-relaxed text-gold">
-            True scale: distances and sizes in proportion. Dots mark where the planets are — at this scale even Jupiter is a speck, and space is almost entirely empty.
-          </p>
-        )}
-        {hazard !== "off" && (
-          <p className="mt-4 font-mono text-[10px] tracking-[0.16em] text-ink/55">
-            {hazard === "loading"
-              ? "READING JPL'S HAZARDOUS-ASTEROID ORBITS…"
-              : hazard === "error"
-                ? "HAZARDOUS-ASTEROID ORBITS UNAVAILABLE RIGHT NOW"
-                : <><span className="text-[#ff6a3d]">●</span> {Math.floor((swarm?.orbits.length ?? 0) / (swarm?.stride ?? 1)).toLocaleString("en")} POTENTIALLY HAZARDOUS ASTEROIDS, EACH ON ITS REAL ORBIT</>}
-          </p>
-        )}
-        <div className="mt-4 font-mono text-[10px] leading-relaxed tracking-[0.15em] text-ink/40">
-          <p className="text-ink/55">HOW TO READ THIS MAP</p>
-          <p className="mt-1">
-            {trueScale
-              ? "DISTANCES AND SIZES ARE IN TRUE PROPORTION."
-              : "DIRECTIONS ARE TRUE, BUT DISTANCES ARE SQUEEZED AND BODIES ENLARGED, OR THE OUTER PLANETS WOULD BE OFF SCREEN AND EVERY WORLD A SPECK. TRY TRUE SCALE TO SEE THE REAL THING."}{" "}
-            ECLIPTIC NORTH IS UP. AU = 149.6 MILLION KM, THE EARTH–SUN DISTANCE.
-          </p>
-          <p className="mt-2">
-            PLANETS AND MOONS COMPUTED IN YOUR BROWSER WITH ASTRONOMY-ENGINE · TITAN AND SPACECRAFT FROM NASA JPL HORIZONS · FIGURES FROM NASA FACT SHEETS
-          </p>
-        </div>
-      </aside>
-
-      {clean && (
-        <p className="pointer-events-none absolute inset-x-0 bottom-5 text-center font-mono text-[10px] tracking-[0.2em] text-ink/40">
-          {shown ? `${fmt(shown, { day: "2-digit", month: "short", year: "numeric" }, "UTC")} · ` : ""}DRAG TO TURN · SCROLL TO ZOOM · <span className="hidden sm:inline">H OR ESC</span>
-          <span className="sm:hidden">TAP SHOW PANELS</span> TO BRING THE PANELS BACK
+      <footer className="mx-auto mt-16 max-w-[1180px] border-t border-ink/10 px-5 py-10 font-mono text-[10px] leading-relaxed tracking-[0.14em] text-ink/40 sm:px-8">
+        <p className="text-ink/55">HOW TO READ THIS MAP</p>
+        <p className="mt-2 max-w-[110ch]">
+          {trueScale ? "DISTANCES AND SIZES ARE IN TRUE PROPORTION." : "DIRECTIONS ARE TRUE, BUT DISTANCES ARE SQUEEZED AND BODIES ENLARGED, OR THE OUTER PLANETS WOULD BE OFF SCREEN AND EVERY WORLD A SPECK. TRY TRUE SCALE TO SEE THE REAL THING."}{" "}
+          ECLIPTIC NORTH IS UP. AU = 149.6 MILLION KM, THE EARTH–SUN DISTANCE.
         </p>
-      )}
+        <p className="mt-3 max-w-[110ch]">
+          PLANETS, THE MOON AND JUPITER&apos;S FOUR LARGE MOONS COMPUTED IN YOUR BROWSER WITH ASTRONOMY-ENGINE · TITAN AND SPACECRAFT FROM NASA JPL HORIZONS · OTHER MOONS ON THEIR MEAN ORBITS, PLACE ALONG THEM APPROXIMATE ·
+          FIGURES FROM NASA FACT SHEETS · PLANET TEXTURES BY SOLAR SYSTEM SCOPE (CC BY 4.0) · POLAR STORMS, MOON SURFACES AND PLUTO DRAWN AFTER JUNO, CASSINI, VOYAGER AND NEW HORIZONS IMAGES · PLATE BOUNDARIES: PETER BIRD (2003) VIA HUGO AHLENIUS, NORDPIL (ODC-BY)
+        </p>
+      </footer>
     </main>
   );
 }

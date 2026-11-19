@@ -159,3 +159,43 @@ html.lenis body {
     animation: none;
   }
 }
+
+/* Cosmoscope's time slider: a thin track filled gold up to the thumb. */
+.cosmo-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+}
+.cosmo-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, #c9a46a 0%, #c9a46a var(--fill, 50%), rgb(236 238 242 / 0.16) var(--fill, 50%));
+}
+.cosmo-range::-moz-range-track {
+  height: 3px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, #c9a46a 0%, #c9a46a var(--fill, 50%), rgb(236 238 242 / 0.16) var(--fill, 50%));
+}
+.cosmo-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  margin-top: -6.5px;
+  height: 16px;
+  width: 16px;
+  border-radius: 9999px;
+  background: #eceef2;
+  border: 3px solid #c9a46a;
+  box-shadow: 0 0 12px rgb(201 164 106 / 0.6);
+}
+.cosmo-range::-moz-range-thumb {
+  height: 12px;
+  width: 12px;
+  border-radius: 9999px;
+  background: #eceef2;
+  border: 3px solid #c9a46a;
+}
+.cosmo-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(236 238 242 / 0.18) transparent;
+}

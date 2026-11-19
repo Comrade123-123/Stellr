@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Html, OrbitControls, useTexture } from "@react-three/drei";
 import * as THREE from "three";
@@ -22,18 +22,24 @@ import {
   toScene,
   trackAt,
   trueRadius,
+  type BodyName,
   type Track,
 } from "@/lib/cosmoscope";
+import { getQuality } from "@/lib/quality";
 import type { Swarm } from "./AsteroidScene";
-import { MakeRoomForPanel, Stars } from "./OrbitScene";
+import { Stars } from "./OrbitScene";
+import { RING_VERTEX } from "./cosmoscope/glsl";
+import { AIR, THIN_RINGS, airMaterial, cloudMaterial, moonMaterial, onGlobe, planetMaterial, plateLines, potatoGeometry, thinRing, type Common } from "./cosmoscope/materials";
 
 /*
- * The solar system at any moment: the Sun and eight planets where astronomy-engine puts
- * them, each on its real orbit (directions and inclinations true), with the larger moons,
- * four spacecraft on their JPL trajectories, and optionally asteroids. Two scales, glided
- * between: compressed distances with enlarged bodies (so everything is visible), and true
- * scale (where the planets all but vanish). Ecliptic north is up. Time comes from a shared
- * clock the page controls; the camera flies to a chosen object and then rides along with it.
+ * The solar system at any moment: the Sun, the planets and Pluto where astronomy-engine puts
+ * them, each on its real orbit (directions and inclinations true) and turned to its real pole
+ * and spin, with twenty moons, four spacecraft on their JPL trajectories, and optionally
+ * asteroids. Surfaces are shaded in ./cosmoscope/glsl.ts: Earth's night lights and ocean glint,
+ * Jupiter's polar cyclones, Saturn's hexagon and ring shadows, and the moons after spacecraft
+ * images. Two scales, glided between: compressed distances with enlarged bodies (so everything
+ * is visible), and true scale. Ecliptic north is up. Time comes from a clock the page controls;
+ * the camera flies to a chosen object and then rides along with it.
  */
 
 /** The page's clock: `t` is the shown moment (ms); `rate` is days per second of playback; `live` tracks real time. */
@@ -43,9 +49,9 @@ export interface Clock {
   live: boolean;
 }
 
-/** A particular view of the chosen planet; `n` makes a repeat request a new one. */
+/** A particular view of the chosen body; `n` makes a repeat request a new one. */
 export interface Look {
-  kind: "storm" | "rings";
+  kind: "storm" | "rings" | "north" | "south" | "plates";
   n: number;
 }
 
@@ -53,6 +59,15 @@ export interface Look {
 export interface Rock {
   el: Elements;
   name: string;
+}
+
+/** What the map shows. */
+export interface Layers {
+  orbits: boolean;
+  labels: boolean;
+  moons: boolean;
+  craft: boolean;
+  plates: boolean;
 }
 
 const GOLD = new THREE.Color("#c9a46a");
@@ -73,7 +88,7 @@ interface Shared {
   mix: number;
   /** The clock's moment this frame. */
   date: Date;
-  /** North poles (scene axes) of bodies the camera may look along. */
+  /** North poles (scene axes) of the bodies. */
   axes: Map<string, THREE.Vector3>;
 }
 
@@ -107,7 +122,7 @@ const place = (shared: React.RefObject<Shared>, key: string, at: THREE.Vector3, 
 };
 
 /** A clickable name tag that follows its object, with a dot marking the spot when the object itself is too small to see. */
-function Tag({ id, label, onSelect, dot = false, above = false, tone = "text-ink/55" }: { id: string; label: string; onSelect: (id: string) => void; dot?: boolean; above?: boolean; tone?: string }) {
+function Tag({ id, label, onSelect, dot = false, above = false, tone = "text-ink/60" }: { id: string; label: string; onSelect: (id: string) => void; dot?: boolean; above?: boolean; tone?: string }) {
   return (
     <Html center zIndexRange={[5, 0]}>
       <div className="relative">
@@ -115,14 +130,42 @@ function Tag({ id, label, onSelect, dot = false, above = false, tone = "text-ink
         <button
           type="button"
           onClick={() => onSelect(id)}
-          className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap font-mono text-[10px] tracking-[0.22em] transition-colors hover:text-ink ${tone} ${
-            above ? "bottom-full mb-10" : "top-full mt-7"
+          className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-1.5 py-0.5 font-mono text-[10px] tracking-[0.22em] transition-colors hover:bg-ink/10 hover:text-ink ${tone} ${
+            above ? "bottom-full mb-9" : "top-full mt-6"
           }`}
         >
           {label.toUpperCase()}
         </button>
       </div>
     </Html>
+  );
+}
+
+/** A label pinned to a spot on a globe, shown only while that spot faces the camera. */
+function SurfaceLabel({ at, text, tone = "text-gold", track }: { at: [number, number, number]; text: string; tone?: string; track?: (world: THREE.Vector3) => void }) {
+  const group = useRef<THREE.Group>(null);
+  const label = useRef<HTMLSpanElement>(null);
+  const world = useMemo(() => new THREE.Vector3(), []);
+  const center = useMemo(() => new THREE.Vector3(), []);
+  const toCam = useMemo(() => new THREE.Vector3(), []);
+  useFrame(({ camera }) => {
+    const g = group.current;
+    if (!g?.parent) return;
+    g.getWorldPosition(world);
+    g.parent.getWorldPosition(center);
+    track?.(world);
+    toCam.copy(camera.position).sub(world);
+    const facing = world.sub(center).dot(toCam) > 0;
+    if (label.current) label.current.style.opacity = facing ? "1" : "0";
+  });
+  return (
+    <group ref={group} position={at}>
+      <Html center zIndexRange={[5, 0]} style={{ pointerEvents: "none" }}>
+        <span ref={label} className={`block whitespace-nowrap pt-10 font-mono text-[9px] tracking-[0.22em] transition-opacity duration-500 ${tone}`}>
+          {text}
+        </span>
+      </Html>
+    </group>
   );
 }
 
@@ -185,24 +228,17 @@ function useScaledLine(points: ArrayLike<number>[] | null, color: THREE.Color, o
   return { object: line?.line ?? null, update };
 }
 
-function OrbitLine({ points, color, opacity, shared }: { points: ArrayLike<number>[]; color: THREE.Color; opacity: number; shared: React.RefObject<Shared> }) {
+function OrbitLine({ points, color, opacity, shared, highlight }: { points: ArrayLike<number>[]; color: THREE.Color; opacity: number; shared: React.RefObject<Shared>; highlight: boolean }) {
   const { object, update } = useScaledLine(points, color, opacity);
+  useEffect(() => {
+    if (!object) return;
+    const m = object.material as THREE.LineBasicMaterial;
+    m.opacity = highlight ? Math.min(0.75, opacity * 3.2) : opacity;
+  }, [object, highlight, opacity]);
   useFrame(() => update(shared.current.mix));
   return object ? <primitive object={object} /> : null;
 }
 
-const ringVertex = /* glsl */ `
-  varying vec2 vUv;
-  varying vec3 vWorld;
-  varying vec3 vNormal;
-  void main() {
-    vUv = uv;
-    vec4 w = modelMatrix * vec4(position, 1.0);
-    vWorld = w.xyz;
-    vNormal = normalize(mat3(modelMatrix) * vec3(0.0, 0.0, 1.0));
-    gl_Position = projectionMatrix * viewMatrix * w;
-  }
-`;
 /*
  * Saturn's rings lit by the Sun at the origin: bright on the sunlit face, dimmer (light
  * scattered through) on the other, and darkened where the planet's shadow falls across them.
@@ -211,11 +247,12 @@ const ringFragment = /* glsl */ `
   uniform sampler2D map;
   uniform vec3 uCenter;
   uniform float uRadius;
-  varying vec2 vUv;
+  uniform float uFill;
+  varying vec3 vRing;
   varying vec3 vWorld;
   varying vec3 vNormal;
   void main() {
-    vec4 t = texture2D(map, vUv);
+    vec4 t = texture2D(map, vec2((length(vRing.xy) - 1.25) / 1.05, 0.5));
     vec3 toSun = normalize(-vWorld);
     vec3 oc = vWorld - uCenter;
     float b = dot(oc, toSun);
@@ -223,7 +260,7 @@ const ringFragment = /* glsl */ `
     float shadow = (b < 0.0 && b * b - c > 0.0) ? 0.06 : 1.0;
     vec3 view = normalize(cameraPosition - vWorld);
     float sunward = dot(vNormal, toSun) * dot(vNormal, view) > 0.0 ? 1.0 : 0.38;
-    float k = sunward * (0.6 + 0.4 * sqrt(abs(dot(vNormal, toSun)))) * shadow;
+    float k = sunward * (0.6 + 0.4 * sqrt(abs(dot(vNormal, toSun)))) * shadow + uFill * 0.4;
     gl_FragColor = vec4(t.rgb * k * 1.35, t.a);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -231,71 +268,88 @@ const ringFragment = /* glsl */ `
 `;
 
 /** Just above the Great Red Spot, in Jupiter's own axes. */
-const GRS_LOCAL = new THREE.Vector3(...STORM_LOCAL).multiplyScalar(1.01);
+const GRS_LOCAL: [number, number, number] = [STORM_LOCAL[0] * 1.01, STORM_LOCAL[1] * 1.01, STORM_LOCAL[2] * 1.01];
 
-/** A label on Jupiter's storm, shown only while it faces the camera. */
-function StormLabel({ shared }: { shared: React.RefObject<Shared> }) {
-  const group = useRef<THREE.Group>(null);
-  const label = useRef<HTMLSpanElement>(null);
-  const world = useMemo(() => new THREE.Vector3(), []);
-  const out = useMemo(() => new THREE.Vector3(), []);
-  useFrame(({ camera }) => {
-    const g = group.current;
-    const center = shared.current.places.get("Jupiter");
-    if (!g || !center) return;
-    g.getWorldPosition(world);
-    place(shared, "grs", world, 0);
-    out.copy(world).sub(center);
-    const facing = out.dot(camera.position.clone().sub(world)) > 0;
-    if (label.current) label.current.style.opacity = facing ? "1" : "0";
-  });
+/** Earth's major plates, labelled near their middles (approximate). */
+const PLATES: [string, number, number][] = [
+  ["PACIFIC", -5, -150],
+  ["NORTH AMERICAN", 48, -100],
+  ["SOUTH AMERICAN", -18, -55],
+  ["EURASIAN", 52, 75],
+  ["AFRICAN", 2, 18],
+  ["ANTARCTIC", -78, 60],
+  ["AUSTRALIAN", -25, 130],
+  ["INDIAN", 10, 75],
+  ["NAZCA", -18, -92],
+  ["ARABIAN", 23, 47],
+  ["PHILIPPINE SEA", 18, 133],
+  ["CARIBBEAN", 15, -75],
+  ["COCOS", 9, -95],
+];
+
+/** Earth's plate boundaries, loaded the first time they're asked for. */
+function Plates({ selected }: { selected: boolean }) {
+  const [lines, setLines] = useState<THREE.LineSegments | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/data/earth-plates.json")
+      .then((res) => res.json())
+      .then((data) => !cancelled && setLines(plateLines(data)))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!lines) return null;
   return (
-    <group ref={group} position={GRS_LOCAL}>
-      <Html center zIndexRange={[5, 0]} style={{ pointerEvents: "none" }}>
-        <span ref={label} className="block whitespace-nowrap pt-12 font-mono text-[10px] tracking-[0.22em] text-gold transition-opacity duration-500">
-          GREAT RED SPOT
-        </span>
-      </Html>
-    </group>
+    <>
+      <primitive object={lines} />
+      {selected && PLATES.map(([name, lat, lon]) => <SurfaceLabel key={name} at={onGlobe(lat, lon, 1.01)} text={name} tone="text-[#ffd49a]" />)}
+    </>
   );
 }
+
+const PLANET_TEXTURES = ["/textures/2k_saturn_ring_alpha.png", "/textures/2k_earth_nightmap.jpg", "/textures/2k_earth_clouds.jpg"];
 
 function Planets({
   clock,
   shared,
+  common,
   trueScale,
   selected,
   onSelect,
   reducedMotion,
+  layers,
+  segments,
 }: {
   clock: React.RefObject<Clock>;
   shared: React.RefObject<Shared>;
+  common: Common;
   trueScale: boolean;
   selected: string | null;
   onSelect: (id: string) => void;
   reducedMotion: boolean;
+  layers: Layers;
+  segments: number;
 }) {
   const mapped = BODIES.filter((b) => b.texture);
-  const textures = useTexture([...mapped.map((b) => b.texture!), "/textures/2k_saturn_ring_alpha.png"]);
+  const textures = useTexture([...mapped.map((b) => b.texture!), ...PLANET_TEXTURES]);
   const camera = useThree((s) => s.camera);
 
   const parts = useMemo(() => {
-    for (const t of textures) t.colorSpace = THREE.SRGBColorSpace;
-    const ringMap = textures[textures.length - 1];
-    const map = (b: (typeof BODIES)[number]) => textures[mapped.indexOf(b)];
-    const materials = BODIES.map((b) =>
-      b.name === "Sun"
-        ? new THREE.MeshBasicMaterial({ map: map(b), color: new THREE.Color(1.6, 1.35, 1.05), toneMapped: false })
-        : new THREE.MeshLambertMaterial(b.texture ? { map: map(b) } : { color: b.color }),
-    );
-    // Ring UVs run radially so the 1-D ring texture maps inner → outer edge.
-    const ring = new THREE.RingGeometry(1.25, 2.3, 160, 1);
-    const pos = ring.attributes.position;
-    const uv = ring.attributes.uv;
-    for (let i = 0; i < pos.count; i++) uv.setXY(i, (Math.hypot(pos.getX(i), pos.getY(i)) - 1.25) / 1.05, 0.5);
+    for (const t of textures) {
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = 4;
+    }
+    const [ringMap, nightMap, cloudMap] = textures.slice(mapped.length);
+    cloudMap.colorSpace = THREE.NoColorSpace;
+    const map = (b: (typeof BODIES)[number]) => (b.texture ? textures[mapped.indexOf(b)] : undefined);
+    const materials = BODIES.map((b) => planetMaterial(b.name, common, { map: map(b), night: b.name === "Earth" ? nightMap : undefined, ring: b.name === "Saturn" ? ringMap : undefined }));
+    // The ring texture runs from the inner edge (1.25 radii) to the outer (2.3); the shader reads it by radius.
+    const ring = new THREE.RingGeometry(1.25, 2.3, 256, 1);
     const ringMaterial = new THREE.ShaderMaterial({
-      uniforms: { map: { value: ringMap }, uCenter: { value: new THREE.Vector3() }, uRadius: { value: 1 } },
-      vertexShader: ringVertex,
+      uniforms: { map: { value: ringMap }, uCenter: { value: new THREE.Vector3() }, uRadius: { value: 1 }, uFill: common.uFill },
+      vertexShader: RING_VERTEX,
       fragmentShader: ringFragment,
       transparent: true,
       side: THREE.DoubleSide,
@@ -308,8 +362,11 @@ function Planets({
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
-    return { materials, ring, ringMaterial, corona };
-    // `mapped` is derived from the constant BODIES.
+    const air = new Map(BODIES.filter((b) => AIR[b.name]).map((b) => [b.name, airMaterial(b.name)]));
+    const clouds = cloudMaterial(common, cloudMap);
+    const thin = new Map(BODIES.filter((b) => THIN_RINGS[b.name]).map((b) => [b.name, thinRing(b.name)]));
+    return { materials, ring, ringMaterial, corona, air, clouds, thin };
+    // `mapped` is derived from the constant BODIES; `common` is made once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [textures]);
 
@@ -325,6 +382,7 @@ function Planets({
   /** Spin angle used for show while time runs too fast for the true one, per body. */
   const showSpin = useRef(new Map<string, number>());
   const corona = useRef<THREE.Mesh>(null);
+  const clouds = useRef<THREE.Mesh>(null);
   const scratch = useMemo<[number, number, number]>(() => [0, 0, 0], []);
   const at = useMemo(() => new THREE.Vector3(), []);
   const basis = useMemo(() => ({ m: new THREE.Matrix4(), x: new THREE.Vector3(), y: new THREE.Vector3(), z: new THREE.Vector3() }), []);
@@ -337,14 +395,15 @@ function Planets({
     if (c.live) c.t = Date.now();
     else c.t += dt * c.rate * 86_400_000;
     s.date = new Date(c.t);
+    if (!reducedMotion) common.uTime.value += dt;
     const goal = trueScale ? 1 : 0;
     s.mix += (goal - s.mix) * (1 - Math.exp(-dt * 1.6));
     if (Math.abs(goal - s.mix) < 1e-3) s.mix = goal;
 
     const trueSpin = (c.live || Math.abs(c.rate) <= MAX_TRUE_SPIN_RATE) && !reducedMotion;
-    for (const b of BODIES) {
+    BODIES.forEach((b, i) => {
       const g = groups.current.get(b.name);
-      if (!g) continue;
+      if (!g) return;
       toScene(helio(b.name, s.date), scratch, s.mix);
       at.set(scratch[0], scratch[1], scratch[2]);
       g.position.copy(at);
@@ -364,24 +423,30 @@ function Planets({
         frame.quaternion.setFromRotationMatrix(basis.m.makeBasis(basis.x, basis.y, basis.z));
         frame.scale.setScalar(radius);
       }
-      if (b.name === "Saturn") s.axes.set("Saturn", (s.axes.get("Saturn") ?? new THREE.Vector3()).set(...f.north));
+      const north = s.axes.get(b.name) ?? new THREE.Vector3();
+      s.axes.set(b.name, north.set(...f.north));
       if (b.ring) {
         parts.ringMaterial.uniforms.uCenter.value.copy(at);
         parts.ringMaterial.uniforms.uRadius.value = radius;
+        const u = parts.materials[i].uniforms;
+        u.uCenter.value.copy(at);
+        u.uNorth.value.copy(north);
+        u.uRadius.value = radius;
       }
       // The Sun keeps a visible glow even at true scale, where its disc is a speck.
       if (b.name === "Sun" && corona.current) corona.current.scale.setScalar(radius * 7 + s.mix * 1.5);
-    }
+    });
     corona.current?.quaternion.copy(camera.quaternion);
+    // Earth's weather drifts a little against the ground.
+    if (clouds.current && !reducedMotion) clouds.current.rotation.y += dt * 0.004;
   });
 
   return (
     <>
-      <ambientLight intensity={0.06} />
-      <pointLight position={[0, 0, 0]} intensity={3.4} decay={0} />
-      {orbits.map((o) => (
-        <OrbitLine key={o.name} points={o.points} color={o.name === "Earth" ? GOLD : INK} opacity={o.name === "Earth" ? 0.5 : 0.16} shared={shared} />
-      ))}
+      {layers.orbits &&
+        orbits.map((o) => (
+          <OrbitLine key={o.name} points={o.points} color={o.name === "Earth" ? GOLD : INK} opacity={o.name === "Earth" ? 0.42 : 0.14} shared={shared} highlight={selected === o.name} />
+        ))}
       {BODIES.map((b, i) => (
         <group
           key={b.name}
@@ -401,11 +466,23 @@ function Planets({
                 onSelect(b.name);
               }}
             >
-              <sphereGeometry args={[1, 64, 64]} />
+              <sphereGeometry args={[1, segments, segments]} />
             </mesh>
-            {/* The rings lie in the planet's equator: its local x–z plane. */}
+            {b.name === "Earth" && (
+              <mesh ref={clouds} material={parts.clouds} scale={1.008}>
+                <sphereGeometry args={[1, segments, segments]} />
+              </mesh>
+            )}
+            {parts.air.get(b.name) && (
+              <mesh material={parts.air.get(b.name)} scale={AIR[b.name]!.scale}>
+                <sphereGeometry args={[1, 64, 64]} />
+              </mesh>
+            )}
+            {/* Rings lie in the planet's equator: its local x–z plane. */}
             {b.ring && <mesh geometry={parts.ring} material={parts.ringMaterial} rotation={[-Math.PI / 2, 0, 0]} />}
-            {b.name === "Jupiter" && selected === "Jupiter" && !trueScale && <StormLabel shared={shared} />}
+            {parts.thin.get(b.name) && <mesh geometry={parts.thin.get(b.name)!.geometry} material={parts.thin.get(b.name)!.material} rotation={[-Math.PI / 2, 0, 0]} />}
+            {b.name === "Earth" && layers.plates && !trueScale && <Plates selected={selected === "Earth"} />}
+            {selected === b.name && !trueScale && layers.labels && <Landmarks name={b.name} shared={shared} />}
           </group>
           {b.name === "Sun" && (
             <mesh ref={corona} material={parts.corona}>
@@ -413,34 +490,84 @@ function Planets({
             </mesh>
           )}
           {/* The chosen body fills the view; its tag would only sit on its face. */}
-          {selected !== b.name && <Tag id={b.name} label={b.name} onSelect={onSelect} dot={trueScale && b.name !== "Sun"} above={b.name === "Sun"} />}
+          {layers.labels && selected !== b.name && <Tag id={b.name} label={b.name} onSelect={onSelect} dot={trueScale && b.name !== "Sun"} above={b.name === "Sun"} />}
         </group>
       ))}
     </>
   );
 }
 
-/** The Moon, Jupiter's four big moons and Titan, around their planets. Hidden at true scale, where they merge with them. */
+/** Named features on the chosen body, pinned to its surface. */
+function Landmarks({ name, shared }: { name: BodyName; shared: React.RefObject<Shared> }) {
+  const grs = useMemo(() => new THREE.Vector3(), []);
+  if (name === "Jupiter")
+    return (
+      <>
+        <SurfaceLabel
+          at={GRS_LOCAL}
+          text="GREAT RED SPOT"
+          track={(w) => {
+            grs.copy(w);
+            place(shared, "grs", grs, 0);
+          }}
+        />
+        <SurfaceLabel at={onGlobe(89, 0, 1.01)} text="NORTH POLAR CYCLONES" />
+        <SurfaceLabel at={onGlobe(-89, 0, 1.01)} text="SOUTH POLAR CYCLONES" />
+      </>
+    );
+  if (name === "Saturn")
+    return (
+      <>
+        <SurfaceLabel at={onGlobe(80, 30, 1.01)} text="NORTH POLAR HEXAGON" />
+        <SurfaceLabel at={onGlobe(-89, 0, 1.01)} text="SOUTH POLAR VORTEX" />
+      </>
+    );
+  if (name === "Mars")
+    return (
+      <>
+        <SurfaceLabel at={onGlobe(18.65, -133.8, 1.01)} text="OLYMPUS MONS" />
+        <SurfaceLabel at={onGlobe(-14, -59, 1.01)} text="VALLES MARINERIS" />
+        <SurfaceLabel at={onGlobe(18.4, 77.5, 1.01)} text="JEZERO · PERSEVERANCE" tone="text-ink/70" />
+        <SurfaceLabel at={onGlobe(-4.6, 137.4, 1.01)} text="GALE · CURIOSITY" tone="text-ink/70" />
+      </>
+    );
+  if (name === "Pluto") return <SurfaceLabel at={onGlobe(20, 175, 1.01)} text="TOMBAUGH REGIO" />;
+  if (name === "Mercury") return <SurfaceLabel at={onGlobe(30.5, 170.2, 1.01)} text="CALORIS BASIN" />;
+  if (name === "Venus") return <SurfaceLabel at={onGlobe(65, 3, 1.01)} text="MAXWELL MONTES" />;
+  return null;
+}
+
+/** Twenty moons around their planets. Hidden at true scale, where they merge with them. */
 function Moons({
   shared,
+  common,
   titan,
   trueScale,
   selected,
   onSelect,
+  labels,
 }: {
   shared: React.RefObject<Shared>;
+  common: Common;
   titan: Track | null;
   trueScale: boolean;
   selected: string | null;
   onSelect: (id: string) => void;
+  labels: boolean;
 }) {
   const [moonMap] = useTexture(["/textures/1k_moon.jpg"]);
-  const materials = useMemo(() => {
+  const parts = useMemo(() => {
     moonMap.colorSpace = THREE.SRGBColorSpace;
-    return MOONS.map((m) => new THREE.MeshLambertMaterial(m.texture ? { map: moonMap } : { color: m.color }));
+    const materials = MOONS.map((m, i) => (m.surface === "moon" ? planetMaterial("Moon", common, { map: moonMap }) : moonMaterial(m.surface, m.color, i * 7.31, common)));
+    const geometries = MOONS.map((m, i) => (m.surface === "potato" ? potatoGeometry(i * 1.7) : null));
+    const titanAir = airMaterial("Titan");
+    return { materials, geometries, titanAir };
+    // `common` is made once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moonMap]);
+  const sphere = useMemo(() => new THREE.SphereGeometry(1, 48, 32), []);
   const groups = useRef(new Map<string, THREE.Group>());
-  const meshes = useRef(new Map<string, THREE.Mesh>());
+  const meshes = useRef(new Map<string, THREE.Group>());
   const dir = useMemo(() => new THREE.Vector3(), []);
 
   useFrame(() => {
@@ -480,19 +607,22 @@ function Moons({
             if (g) groups.current.set(m.name, g);
           }}
         >
-          <mesh
-            ref={(mesh) => {
-              if (mesh) meshes.current.set(m.name, mesh);
-            }}
-            material={materials[i]}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelect(m.name);
+          <group
+            ref={(g) => {
+              if (g) meshes.current.set(m.name, g);
             }}
           >
-            <sphereGeometry args={[1, 32, 32]} />
-          </mesh>
-          {!trueScale && near(m.parent) && selected !== m.name && <Tag id={m.name} label={m.name} onSelect={onSelect} />}
+            <mesh
+              geometry={parts.geometries[i] ?? sphere}
+              material={parts.materials[i]}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect(m.name);
+              }}
+            />
+            {m.name === "Titan" && <mesh geometry={sphere} material={parts.titanAir} scale={1.08} />}
+          </group>
+          {labels && !trueScale && near(m.parent) && selected !== m.name && <Tag id={m.name} label={m.name} onSelect={onSelect} tone="text-ink/50" />}
         </group>
       ))}
     </>
@@ -500,7 +630,7 @@ function Moons({
 }
 
 /** One spacecraft: its JPL path since launch and where it is now. */
-function Craft({ name, track, shared, trueScale, selected, onSelect }: { name: string; track: Track; shared: React.RefObject<Shared>; trueScale: boolean; selected: string | null; onSelect: (id: string) => void }) {
+function Craft({ name, track, shared, trueScale, selected, onSelect, labels }: { name: string; track: Track; shared: React.RefObject<Shared>; trueScale: boolean; selected: string | null; onSelect: (id: string) => void; labels: boolean }) {
   const points = useMemo(() => {
     const list: Float64Array[] = [];
     for (let i = 0; i < track.length; i += 4) list.push(track.subarray(i + 1, i + 4));
@@ -529,7 +659,7 @@ function Craft({ name, track, shared, trueScale, selected, onSelect }: { name: s
       {object && <primitive object={object} />}
       <group ref={group}>
         <Glow color={CRAFT_COLOR} size={0.045} />
-        {selected !== name && <Tag id={name} label={name} onSelect={onSelect} dot={trueScale} tone="text-[#7fd4ff]/70" />}
+        {labels && selected !== name && <Tag id={name} label={name} onSelect={onSelect} dot={trueScale} tone="text-[#7fd4ff]/75" />}
       </group>
     </>
   );
@@ -615,9 +745,10 @@ function Fly({
   const last = useMemo(() => new THREE.Vector3(), []);
   const goal = useMemo(() => new THREE.Vector3(), []);
   const offset = useMemo(() => new THREE.Vector3(), []);
+  const sunward = useMemo(() => new THREE.Vector3(), []);
   const up = useMemo(() => new THREE.Vector3(0, 1, 0), []);
 
-  /** A particular view asked for: Jupiter's storm face-on, or Saturn's rings from above. */
+  /** A particular view asked for: a storm face-on, the rings from above, a pole. */
   const looking = useRef<Look["kind"] | null>(null);
   useEffect(() => {
     flying.current = true;
@@ -651,23 +782,27 @@ function Fly({
       // Come in from the Sun's side, a little above, so the lit face shows.
       const distance = selected === "Sun" ? radius * 9 + 0.6 : radius * 6 + 0.6;
       const spot = s.places.get("grs");
-      const north = s.axes.get("Saturn");
+      const north = selected ? s.axes.get(selected) : null;
+      sunward.copy(target).negate().normalize();
       if (looking.current === "storm" && spot) {
         // Above the storm, leaning towards the Sun so the spot is seen in daylight where it can be.
         offset.copy(spot).sub(target).normalize();
-        offset.add(goal.copy(target).negate().normalize().multiplyScalar(0.5)).normalize();
+        offset.add(goal.copy(sunward).multiplyScalar(0.5)).normalize();
         goal.copy(target).add(offset.multiplyScalar(radius * 4.2));
       } else if (looking.current === "rings" && north) {
         // High over the sunlit face of the rings, the Sun behind the camera.
-        offset.copy(target).negate().normalize();
-        offset.addScaledVector(north, 1.4 * (Math.sign(offset.dot(north)) || 1)).normalize();
+        offset.copy(sunward).addScaledVector(north, 1.4 * (Math.sign(sunward.dot(north)) || 1)).normalize();
         goal.copy(target).add(offset.multiplyScalar(radius * 7.5));
+      } else if ((looking.current === "north" || looking.current === "south") && north) {
+        // Over the pole, leaning sunwards.
+        offset.copy(north).multiplyScalar(looking.current === "north" ? 1 : -1).addScaledVector(sunward, 0.35).normalize();
+        goal.copy(target).add(offset.multiplyScalar(radius * 3.4));
       } else {
-        offset.copy(target).negate();
+        offset.copy(sunward);
         if (offset.lengthSq() < 1e-6) offset.set(0, 0, 1);
-        offset.normalize().applyAxisAngle(up, 0.7);
+        offset.applyAxisAngle(up, 0.7);
         offset.y += 0.35;
-        goal.copy(target).add(offset.normalize().multiplyScalar(distance));
+        goal.copy(target).add(offset.normalize().multiplyScalar(looking.current === "plates" ? radius * 3.6 : distance));
       }
       camera.position.lerp(goal, k);
       c.target.lerp(target, k);
@@ -694,6 +829,28 @@ function Fly({
   return null;
 }
 
+/** Shifts the view left on wide screens, so what the camera looks at isn't hidden behind the side panel. */
+function MakeRoom({ shift }: { shift: number }) {
+  const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
+  const size = useThree((s) => s.size);
+  useEffect(() => {
+    const px = size.width >= 1024 ? shift : 0;
+    if (px) camera.setViewOffset(size.width, size.height, px, 0, size.width, size.height);
+    else camera.clearViewOffset();
+    camera.updateProjectionMatrix();
+  }, [camera, size, shift]);
+  return null;
+}
+
+/** Keeps the fill light's uniform in step with the page. */
+function Fill({ common, on }: { common: Common; on: boolean }) {
+  useFrame((_, delta) => {
+    const goal = on ? 1 : 0;
+    common.uFill.value += (goal - common.uFill.value) * (1 - Math.exp(-Math.min(delta, 0.1) * 4));
+  });
+  return null;
+}
+
 export default function CosmoscopeScene({
   clock,
   selected,
@@ -704,6 +861,10 @@ export default function CosmoscopeScene({
   rock,
   look = null,
   reducedMotion,
+  layers,
+  fill,
+  active,
+  panelShift,
 }: {
   clock: React.RefObject<Clock>;
   selected: string | null;
@@ -715,12 +876,22 @@ export default function CosmoscopeScene({
   rock: Rock | null;
   look?: Look | null;
   reducedMotion: boolean;
+  layers: Layers;
+  /** Light the night sides, to see what's there. */
+  fill: boolean;
+  /** Render only while the scene is on screen. */
+  active: boolean;
+  /** Pixels to shift the view left for the side panel on wide screens. */
+  panelShift: number;
 }) {
   const controls = useRef<OrbitControlsImpl | null>(null);
   const shared = useRef<Shared>({ places: new Map(), radii: new Map(), mix: 0, date: new Date(0), axes: new Map() });
+  const common = useMemo<Common>(() => ({ uTime: { value: 0 }, uFill: { value: 0 } }), []);
+  const quality = useMemo(() => getQuality(), []);
   return (
     <Canvas
-      dpr={[1, 1.5]}
+      dpr={quality.dpr}
+      frameloop={active ? "always" : "never"}
       camera={{ fov: 40, near: 0.01, far: 8000, position: [0, 140, 220] }}
       gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
       onCreated={({ gl }) => gl.setClearColor("#000000")}
@@ -729,16 +900,28 @@ export default function CosmoscopeScene({
         <Stars />
       </group>
       {/* Planets first: it moves the clock and the scale for the rest each frame. */}
-      <Planets clock={clock} shared={shared} trueScale={trueScale} selected={selected} onSelect={onSelect} reducedMotion={reducedMotion} />
-      <Moons shared={shared} titan={tracks.get("Titan") ?? null} trueScale={trueScale} selected={selected} onSelect={onSelect} />
-      {CRAFT.map((c) => {
-        const track = tracks.get(c.name);
-        return track ? <Craft key={c.name} name={c.name} track={track} shared={shared} trueScale={trueScale} selected={selected} onSelect={onSelect} /> : null;
-      })}
+      <Planets
+        clock={clock}
+        shared={shared}
+        common={common}
+        trueScale={trueScale}
+        selected={selected}
+        onSelect={onSelect}
+        reducedMotion={reducedMotion}
+        layers={layers}
+        segments={Math.min(quality.sphereSegments, 96)}
+      />
+      {layers.moons && <Moons shared={shared} common={common} titan={tracks.get("Titan") ?? null} trueScale={trueScale} selected={selected} onSelect={onSelect} labels={layers.labels} />}
+      {layers.craft &&
+        CRAFT.map((c) => {
+          const track = tracks.get(c.name);
+          return track ? <Craft key={c.name} name={c.name} track={track} shared={shared} trueScale={trueScale} selected={selected} onSelect={onSelect} labels={layers.labels} /> : null;
+        })}
       {swarm && <Hazardous swarm={swarm} shared={shared} />}
       {rock && <Asteroid rock={rock} shared={shared} trueScale={trueScale} selected={selected} onSelect={onSelect} />}
       <Fly selected={selected} trueScale={trueScale} look={look} shared={shared} controls={controls} />
-      <MakeRoomForPanel />
+      <Fill common={common} on={fill} />
+      <MakeRoom shift={panelShift} />
       <OrbitControls
         ref={controls}
         enablePan={false}
