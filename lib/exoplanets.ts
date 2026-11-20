@@ -78,10 +78,55 @@ export function planetFromRow(r: unknown[]): Planet {
   };
 }
 
-/** A light curve: times in BTJD (BJD − 2457000) and flux normalised to 1. */
+/**
+ * A light curve: times in BTJD (BJD − 2457000) and flux normalised to 1, with the star's
+ * light centre (pixels from its median) where the file had it.
+ */
 export interface Curve {
   t: Float64Array;
   f: Float64Array;
+  cx?: Float64Array;
+  cy?: Float64Array;
+}
+
+/** The points of a curve at `idx`, keeping the centroid columns aligned. */
+export function pick(curve: Curve, idx: number[], f?: ArrayLike<number>): Curve {
+  const out: Curve = { t: Float64Array.from(idx, (i) => curve.t[i]), f: Float64Array.from(idx, (i) => (f ?? curve.f)[i]) };
+  if (curve.cx && curve.cy) {
+    out.cx = Float64Array.from(idx, (i) => curve.cx![i]);
+    out.cy = Float64Array.from(idx, (i) => curve.cy![i]);
+  }
+  return out;
+}
+
+/** Curves joined in time order. */
+export function join(parts: Curve[]): Curve {
+  const sorted = [...parts].sort((a, b) => a.t[0] - b.t[0]);
+  const n = sorted.reduce((a, p) => a + p.t.length, 0);
+  const withC = sorted.every((p) => p.cx && p.cy);
+  const out: Curve = { t: new Float64Array(n), f: new Float64Array(n) };
+  if (withC) {
+    out.cx = new Float64Array(n);
+    out.cy = new Float64Array(n);
+  }
+  let k = 0;
+  for (const p of sorted) {
+    out.t.set(p.t, k);
+    out.f.set(p.f, k);
+    if (withC) {
+      out.cx!.set(p.cx!, k);
+      out.cy!.set(p.cy!, k);
+    }
+    k += p.t.length;
+  }
+  return out;
+}
+
+/** A transit ephemeris: period and mid-transit (days, BTJD) and duration (hours). */
+export interface Ephemeris {
+  period: number;
+  t0: number;
+  duration: number;
 }
 
 /** TESS times are BJD − 2457000. */
@@ -95,24 +140,64 @@ function median(values: number[]) {
 }
 
 /**
- * Takes out the star's slow changes (spots, rotation, instrument drift) so only short dips
- * remain: each point is divided by the median of its neighbours within ±`window` days,
- * sampled on a grid every quarter of the window and interpolated. Bright outliers
- * (more than 4σ above) are dropped; dips are kept, since they may be transits.
+ * Tukey's biweight location of `v` (c = 5): a mean that ignores outliers, starting from the
+ * median and down-weighting points far from it. Kept points that are dips pull it far less
+ * than a plain mean, and it follows the star more smoothly than a median. (Hippke et al. 2019,
+ * "Wōtan", found it the best of the common detrending filters for finding transits.)
  */
-export function flatten(curve: Curve, window = 0.5): Curve {
+function biweight(v: number[]) {
+  let m = median(v);
+  for (let it = 0; it < 4; it++) {
+    const mad = median(v.map((x) => Math.abs(x - m))) || 1e-9;
+    let num = 0;
+    let den = 0;
+    for (const x of v) {
+      const u = (x - m) / (5 * mad);
+      if (u * u >= 1) continue;
+      const w = (1 - u * u) * (1 - u * u);
+      num += w * x;
+      den += w;
+    }
+    if (!den) break;
+    const next = num / den;
+    if (Math.abs(next - m) < 1e-7) {
+      m = next;
+      break;
+    }
+    m = next;
+  }
+  return m;
+}
+
+/**
+ * Takes out the star's slow changes (spots, rotation, instrument drift) so only short dips
+ * remain: each point is divided by the biweight location of its neighbours within ±`window`
+ * days, sampled on a grid every eighth of the window and interpolated. Points in `exclude`
+ * (known transits) don't shape the trend, so a dip found once isn't partly flattened away when
+ * the curve is cleaned again around it. Bright outliers (more than 4σ above) are dropped;
+ * dips are kept, since they may be transits.
+ */
+export function flatten(curve: Curve, window = 0.5, exclude: Ephemeris[] = []): Curve {
   const { t, f } = curve;
   const n = t.length;
   if (n < 10) return curve;
-  const step = window / 4;
+  const out = new Uint8Array(n);
+  for (const e of exclude) {
+    const half = (e.duration / 24) * 0.75;
+    for (let i = 0; i < n; i++) if (Math.abs(fromTransit(t[i], e.period, e.t0)) < half) out[i] = 1;
+  }
+  const step = window / 8;
   const knots: { t: number; m: number }[] = [];
   let lo = 0;
   let hi = 0;
   for (let k = t[0]; k <= t[n - 1] + step; k += step) {
     while (lo < n && t[lo] < k - window) lo++;
     while (hi < n && t[hi] <= k + window) hi++;
-    if (hi - lo >= 5) knots.push({ t: k, m: median(Array.from(f.subarray(lo, hi))) });
+    const vals: number[] = [];
+    for (let i = lo; i < hi; i++) if (!out[i]) vals.push(f[i]);
+    if (vals.length >= 5) knots.push({ t: k, m: biweight(vals) });
   }
+  if (knots.length < 2) return curve;
   const trend = new Float64Array(n);
   let j = 0;
   for (let i = 0; i < n; i++) {
@@ -124,15 +209,11 @@ export function flatten(curve: Curve, window = 0.5): Curve {
   }
   const flat = Array.from(f, (v, i) => v / trend[i]);
   const sigma = 1.4826 * median(flat.map((v) => Math.abs(v - 1)));
-  const keepT: number[] = [];
-  const keepF: number[] = [];
+  const keep: number[] = [];
   flat.forEach((v, i) => {
-    if (Number.isFinite(v) && v - 1 < 4 * sigma) {
-      keepT.push(t[i]);
-      keepF.push(v);
-    }
+    if (Number.isFinite(v) && v - 1 < 4 * sigma) keep.push(i);
   });
-  return { t: Float64Array.from(keepT), f: Float64Array.from(keepF) };
+  return pick(curve, keep, flat);
 }
 
 /** Robust scatter (σ) of a flattened light curve around 1. */
@@ -173,7 +254,7 @@ export function bls(curve: Curve, opts: { minP?: number; maxP?: number; maxFreqs
   if (n < 50) return null;
   const span = t[n - 1] - t[0];
   const minP = opts.minP ?? 0.4;
-  const maxP = Math.min(opts.maxP ?? 30, span / 2);
+  const maxP = Math.min(opts.maxP ?? 40, span / 2);
   if (maxP <= minP) return null;
 
   // Weights from the scatter, the same for every point; flux as dip below 1.
@@ -183,19 +264,22 @@ export function bls(curve: Curve, opts: { minP?: number; maxP?: number; maxFreqs
   mean /= n;
   for (let i = 0; i < n; i++) y[i] -= mean;
 
-  // Frequency grid: Δf = q / (3 · span) with q the expected duty cycle ~ duration/period.
-  const freqs: number[] = [];
+  // Frequency grid: Δf = q / (3 · span) with q the expected duty cycle ~ duration/period, so a
+  // transit drifts by under a third of its length across the whole baseline. Data spread over
+  // years need very many; past the cap, every step is widened by the same factor, keeping the
+  // grid finest where it must be (long periods) rather than thinning it evenly.
   const fmin = 1 / maxP;
   const fmax = 1 / minP;
   const likelyDuration = (P: number) => Math.max(0.04, 0.1 * Math.cbrt(P)); // days, Sun-like star
-  for (let fr = fmin; fr <= fmax; ) {
-    freqs.push(fr);
-    const P = 1 / fr;
-    fr += likelyDuration(P) / P / (3 * span);
-  }
-  // Too fine for the time available: thin evenly in frequency.
-  const cap = opts.maxFreqs ?? 60_000;
-  const grid = freqs.length > cap ? Array.from({ length: cap }, (_, k) => fmin + ((fmax - fmin) * k) / (cap - 1)) : freqs;
+  const step = (fr: number) => likelyDuration(1 / fr) * fr / (3 * span);
+  const build = (k: number) => {
+    const out: number[] = [];
+    for (let fr = fmin; fr <= fmax; fr += k * step(fr)) out.push(fr);
+    return out;
+  };
+  const cap = opts.maxFreqs ?? 150_000;
+  let grid = build(1);
+  if (grid.length > cap) grid = build(grid.length / cap);
 
   const power = new Float64Array(grid.length);
   const best = { power: -1, freq: 0, start: 0, width: 0 };
@@ -332,7 +416,59 @@ export function measure(curve: Curve, period: number, t0: number, durationH: num
     /** The middle half of the transit against its outer half: a flat-bottomed (U) dip has them alike; a V-shaped one, typical of grazing eclipsing stars, is much shallower at the edges. */
     shape: { core: base - avg(core), edge: base - avg(edge), err: Math.hypot(err(core.length), err(edge.length)) },
     variability: variability(curve, period, t0, half, sigma),
+    centroid: centroid(curve, period, t0, half, depth),
   };
+}
+
+/**
+ * Does the star's light centre move during the dip? For each transit, the centroid inside it
+ * against the centroid just around it (out to three transit-lengths away), averaged over all
+ * transits. A shift divided by the depth estimates how far from the target the dimming star
+ * lies, in pixels (21″ each): a planet's own star gives ~0, a blended neighbour several. Null
+ * when the light curve carries no centroid or too little is around the transits.
+ */
+function centroid(curve: Curve, period: number, t0: number, half: number, depth: number) {
+  const { cx, cy } = curve;
+  if (!cx || !cy || !(depth > 0)) return null;
+  const inX: number[] = [];
+  const inY: number[] = [];
+  const outX: number[] = [];
+  const outY: number[] = [];
+  // Baselines per transit, so slow drifts in the centroid cancel.
+  const byEpoch = new Map<number, { ix: number[]; iy: number[]; ox: number[]; oy: number[] }>();
+  for (let i = 0; i < curve.t.length; i++) {
+    const dt = Math.abs(fromTransit(curve.t[i], period, t0));
+    if (dt > half * 6) continue;
+    const e = Math.round((curve.t[i] - t0) / period);
+    const g = byEpoch.get(e) ?? { ix: [], iy: [], ox: [], oy: [] };
+    byEpoch.set(e, g);
+    if (dt < half * 0.8) {
+      g.ix.push(cx[i]);
+      g.iy.push(cy[i]);
+    } else if (dt > half * 1.5) {
+      g.ox.push(cx[i]);
+      g.oy.push(cy[i]);
+    }
+  }
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  for (const g of byEpoch.values()) {
+    if (g.ix.length < 2 || g.ox.length < 4) continue;
+    const bx = mean(g.ox);
+    const by = mean(g.oy);
+    for (const v of g.ix) inX.push(v - bx);
+    for (const v of g.iy) inY.push(v - by);
+    for (const v of g.ox) outX.push(v - bx);
+    for (const v of g.oy) outY.push(v - by);
+  }
+  if (inX.length < 3 || outX.length < 10) return null;
+  const sd = (xs: number[]) => 1.4826 * median(xs.map((v) => Math.abs(v)));
+  const dx = mean(inX);
+  const dy = mean(inY);
+  const ex = sd(outX) / Math.sqrt(inX.length);
+  const ey = sd(outY) / Math.sqrt(inY.length);
+  const shift = Math.hypot(dx, dy);
+  const sigma = Math.hypot(dx / (ex || 1e-9), dy / (ey || 1e-9)) / Math.SQRT2;
+  return { dx, dy, sigma, offsetPx: shift / depth, offsetErr: Math.hypot(ex, ey) / depth };
 }
 
 /**
@@ -370,7 +506,7 @@ export function mask(curve: Curve, period: number, t0: number, durationH: number
   const half = (durationH / 24) * 0.75;
   const keep: number[] = [];
   for (let i = 0; i < curve.t.length; i++) if (Math.abs(fromTransit(curve.t[i], period, t0)) > half) keep.push(i);
-  return { t: Float64Array.from(keep, (i) => curve.t[i]), f: Float64Array.from(keep, (i) => curve.f[i]) };
+  return pick(curve, keep);
 }
 
 /** How a found period relates to a known planet's: the same, or a simple multiple (often a sign of a missed or doubled transit). */
@@ -400,3 +536,150 @@ export const longestTransit = (period: number, starRadius: number) => 13 * Math.
 
 /** Twice Jupiter's radius, in Earth radii: anything larger is a star, not a planet. */
 export const MAX_PLANET_RADIUS = 22.4;
+
+/**
+ * A transit-shaped refit of a BLS detection, after Transit Least Squares (Hippke & Heller 2019):
+ * a real transit has sloped ingress and egress and a limb-darkened, rounded bottom, not a
+ * box. Around the BLS peak, nearby periods, mid-times, durations and ingress lengths are
+ * tried with that shape, and the best is kept. Depths and durations come out closer to the
+ * truth, and small planets gain signal-to-noise. A box would leave part of each transit out.
+ */
+export function refine(curve: Curve, r: { period: number; t0: number; duration: number }) {
+  const { t, f } = curve;
+  const n = t.length;
+  if (n < 50) return null;
+  const span = t[n - 1] - t[0];
+  const sigma = scatter(f);
+  // Quadratic limb darkening for a Sun-like star in the TESS band.
+  const u1 = 0.4;
+  const u2 = 0.25;
+  const norm = 1 - u1 / 3 - u2 / 6;
+  const shape = (x: number, ingress: number) => {
+    // x: distance from mid-transit in units of half the duration.
+    const ax = Math.abs(x);
+    if (ax >= 1) return 0;
+    const edge = ax > 1 - ingress ? (1 - ax) / ingress : 1;
+    const r2 = Math.min(1, (ax * ax) / ((1 - ingress / 2) ** 2));
+    const mu = Math.sqrt(1 - r2);
+    const ld = (1 - u1 * (1 - mu) - u2 * (1 - mu) ** 2) / norm;
+    return edge * ld;
+  };
+  let best = { chi: Infinity, period: r.period, t0: r.t0, duration: r.duration, depth: 0, snr: 0, ingress: 0.2 };
+  const half0 = r.duration / 48;
+  const dP = (r.period * half0) / Math.max(span, r.period);
+  for (let ip = -3; ip <= 3; ip++) {
+    const P = r.period + ip * dP * 0.5;
+    for (let it = -4; it <= 4; it++) {
+      const tc = r.t0 + it * half0 * 0.15;
+      for (const k of [0.6, 0.75, 0.9, 1.0, 1.15, 1.3, 1.5]) {
+        const half = half0 * k;
+        for (const ingress of [0.1, 0.25, 0.4, 0.6]) {
+          let sy = 0;
+          let ss = 0;
+          let yy = 0;
+          for (let i = 0; i < n; i++) {
+            const dt = fromTransit(t[i], P, tc);
+            if (Math.abs(dt) > half * 2.5) continue;
+            const y = 1 - f[i];
+            const m = shape(dt / half, ingress);
+            sy += m * y;
+            ss += m * m;
+            yy += y * y;
+          }
+          if (ss <= 0) continue;
+          const depth = sy / ss;
+          if (depth <= 0) continue;
+          // χ² of the window with the model, relative to the flat line (yy): lower is better.
+          const chi = yy - (sy * sy) / ss;
+          if (chi < best.chi) best = { chi, period: P, t0: tc, duration: half * 48, depth, snr: (depth * Math.sqrt(ss)) / sigma, ingress };
+        }
+      }
+    }
+  }
+  return Number.isFinite(best.chi) ? best : null;
+}
+
+export interface SingleDip {
+  /** Mid-dip, BTJD. */
+  t0: number;
+  /** Hours. */
+  duration: number;
+  depth: number;
+  snr: number;
+}
+
+/**
+ * Lone dips: a planet on a long orbit may cross its star only once while TESS watches. Boxes of
+ * 2 to 13 hours are slid along the (already flattened, already masked) light curve; a dip
+ * counts when it is at least `minSnr` deep for the noise, well covered by data, has data on
+ * both sides, and sits away from the gaps where the spacecraft's data are least trustworthy.
+ * The strongest few, not overlapping, are returned.
+ */
+export function singleDips(curve: Curve, minSnr = 10, max = 3): SingleDip[] {
+  const { t, f } = curve;
+  const n = t.length;
+  if (n < 100) return [];
+  const sigma = scatter(f);
+  const cadence = median(Array.from({ length: Math.min(n - 1, 2000) }, (_, i) => t[i + 1] - t[i]));
+  // Gaps over half a day, and how near each point is to one.
+  const gaps: number[] = [t[0]];
+  for (let i = 1; i < n; i++) if (t[i] - t[i - 1] > 0.5) gaps.push(t[i - 1], t[i]);
+  gaps.push(t[n - 1]);
+  const nearGap = (time: number) => gaps.some((g) => Math.abs(g - time) < 0.75);
+  const found: SingleDip[] = [];
+  for (const hours of [2, 3, 4, 6, 9, 13]) {
+    const w = hours / 24;
+    const expect = w / cadence;
+    let lo = 0;
+    let hi = 0;
+    for (let c = t[0] + w; c < t[n - 1] - w; c += w / 4) {
+      while (lo < n && t[lo] < c - w / 2) lo++;
+      while (hi < n && t[hi] <= c + w / 2) hi++;
+      const k = hi - lo;
+      if (k < Math.max(3, 0.6 * expect)) continue;
+      let sum = 0;
+      for (let i = lo; i < hi; i++) sum += 1 - f[i];
+      const depth = sum / k;
+      const snr = (depth / sigma) * Math.sqrt(k);
+      if (snr < minSnr || depth > 0.03) continue;
+      if (nearGap(c)) continue;
+      // Data on both sides, within a dip-length.
+      let before = 0;
+      let after = 0;
+      for (let i = Math.max(0, lo - Math.ceil(expect * 1.5)); i < lo; i++) if (t[i] > c - w * 1.5) before++;
+      for (let i = hi; i < Math.min(n, hi + Math.ceil(expect * 1.5)); i++) if (t[i] < c + w * 1.5) after++;
+      if (before < 0.4 * expect || after < 0.4 * expect) continue;
+      found.push({ t0: c, duration: hours, depth, snr });
+    }
+  }
+  found.sort((a, b) => b.snr - a.snr);
+  const out: SingleDip[] = [];
+  for (const d of found) {
+    if (out.some((o) => Math.abs(o.t0 - d.t0) < (o.duration + d.duration) / 24)) continue;
+    out.push(d);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/**
+ * One full search, shared by Exoplanet Lab's worker and the Wobble agent so both find alike:
+ * flatten, hide signals already found, Box Least Squares, then a transit-shaped refit; then the
+ * light curve is flattened again with this signal's transits kept out of the trend (so the
+ * clean-up doesn't eat into them) and measured, and finally searched for lone dips with every
+ * signal hidden.
+ */
+export function searchOnce(curve: Curve, found: Ephemeris[], opts: { maxP?: number; maxFreqs?: number; progress?: (p: number) => void } = {}) {
+  const hide = (c: Curve, list: Ephemeris[]) => list.reduce((acc, m) => mask(acc, m.period, m.t0, m.duration), c);
+  const flat = hide(flatten(curve, 0.5, found), found);
+  const first = bls(flat, opts);
+  if (!first) return { flat, result: null, checks: null, singles: singleDips(flat) };
+  const fit = refine(flat, first);
+  const result: BlsResult = fit && fit.snr > first.snr ? { ...first, period: fit.period, t0: fit.t0, duration: fit.duration, depth: fit.depth, snr: fit.snr } : first;
+  const eph = { period: result.period, t0: result.t0, duration: result.duration };
+  const clean = hide(flatten(curve, 0.5, [...found, eph]), found);
+  const checks = measure(clean, result.period, result.t0, result.duration);
+  // Measured on the clean curve, the box depth and its significance are the better figures.
+  if (checks.depth > 0 && checks.snr > result.snr) Object.assign(result, { depth: checks.depth, snr: checks.snr });
+  return { flat: clean, result, checks, singles: singleDips(mask(clean, eph.period, eph.t0, eph.duration)) };
+}

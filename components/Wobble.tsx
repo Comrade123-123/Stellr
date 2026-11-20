@@ -18,6 +18,9 @@ interface Finding {
   sde: number;
   transits: number;
   score: number | null;
+  /** The vetter's score after the light-curve checks. */
+  scoreAfter?: number | null;
+  centroid?: { offsetPx: number; sigma: number } | null;
   radiusEarth: number | null;
   world: { kind: string; teq: number; insolation: number; inZone: boolean } | null;
   fold: { x: number[]; y: number[] };
@@ -46,12 +49,13 @@ interface Log {
   investigations: Investigation[];
 }
 
-type Filter = "all" | "candidate" | "recovered" | "doubt" | "quiet";
+type Filter = "all" | "candidate" | "recovered" | "single" | "doubt" | "quiet";
 
 const FILTERS: [Filter, string][] = [
   ["all", "ALL"],
   ["candidate", "NEW CANDIDATES"],
   ["recovered", "RECOVERED"],
+  ["single", "SINGLE DIPS"],
   ["doubt", "RULED OUT"],
   ["quiet", "QUIET STARS"],
 ];
@@ -70,7 +74,7 @@ const matches = (i: Investigation, f: Filter) => {
   return i.findings.some((x) => x.kind === f);
 };
 
-const tone = (kind: string) => (kind === "candidate" || kind === "toi" ? "text-gold" : kind === "known" || kind === "alias" ? "text-ink" : "text-ink/60");
+const tone = (kind: string) => (kind === "candidate" || kind === "toi" || kind === "single" ? "text-gold" : kind === "known" || kind === "alias" ? "text-ink" : "text-ink/60");
 
 function FindingCard({ f }: { f: Finding }) {
   const lo = Math.min(...f.fold.y, 1 - f.depth) - f.depth * 0.3 - 0.0003;
@@ -83,12 +87,20 @@ function FindingCard({ f }: { f: Finding }) {
       <div className="mt-3 grid gap-4 sm:grid-cols-[1fr_200px]">
         <dl className="grid grid-cols-3 gap-x-4 gap-y-3 font-mono">
           {[
-            ["PERIOD", `${f.period.toFixed(3)} D`],
+            f.kind === "single" ? ["WHEN", `BTJD ${f.t0.toFixed(2)}`] : ["PERIOD", `${f.period.toFixed(3)} D`],
             ["DEPTH", depthText(f.depth)],
             ["DURATION", `${f.duration.toFixed(1)} H`],
-            ["SNR · SDE", `${f.snr.toFixed(0)} · ${f.sde.toFixed(0)}`],
+            f.kind === "single" ? ["SNR", f.snr.toFixed(0)] : ["SNR · SDE", `${f.snr.toFixed(0)} · ${f.sde.toFixed(0)}`],
             ["SIZE", f.radiusEarth ? `≈ ${f.radiusEarth.toFixed(1)} × EARTH` : "—"],
-            ["ML VETTER", f.score === null ? "—" : `${Math.round(f.score * 100)}% PLANET-LIKE`],
+            [
+              "ML VETTER",
+              f.score === null
+                ? "—"
+                : f.scoreAfter != null && Math.abs(f.scoreAfter - f.score) > 0.005
+                  ? `${Math.round(f.score * 100)}% → ${Math.round(f.scoreAfter * 100)}% AFTER CHECKS`
+                  : `${Math.round(f.score * 100)}% PLANET-LIKE`,
+            ],
+            ...(f.centroid ? [["CENTROID", `${f.centroid.sigma.toFixed(1)}σ · ~${Math.round(f.centroid.offsetPx * 21)}″`]] : []),
           ].map(([k, v]) => (
             <div key={k}>
               <dt className="text-[9px] tracking-[0.2em] text-ink/40">{k}</dt>
@@ -137,6 +149,7 @@ interface Leads {
   ruledOut: number;
   candidates: number;
   strong: number;
+  singles: number;
   leads: { investigation: Omit<Investigation, "findings">; finding: Finding }[];
 }
 
@@ -175,28 +188,33 @@ function NewLeads() {
           <p className="caps mt-3 max-w-[78ch] text-[12px] leading-relaxed text-ink/60">
             {data.candidates === 0
               ? `Across ${data.stars.toLocaleString("en")} stars and ${data.signals} signals, everything Wobble found was a known planet or TESS candidate (${data.recovered}) or was ruled out by the checks (${data.ruledOut}). That is how surveys usually go; it keeps looking every day.`
-              : `Across ${data.stars.toLocaleString("en")} stars, ${data.recovered} signals were known planets or TESS candidates and ${data.ruledOut} were ruled out. These ${data.candidates === 1 ? "one is" : "are"} not on NASA's lists of confirmed planets or TESS Objects of Interest${data.strong ? `, and ${data.strong} look${data.strong === 1 ? "s" : ""} strong (planet-like score above 50%, signal-to-noise above 10, three or more transits)` : ""}. None is a discovery yet: each needs checking by people and follow-up observations before anyone could call it a planet.`}
+              : `Across ${data.stars.toLocaleString("en")} stars, ${data.recovered} signals were known planets or TESS candidates and ${data.ruledOut} were ruled out. These ${data.candidates === 1 ? "one is" : "are"} not on NASA's lists of confirmed planets or TESS Objects of Interest${data.strong ? `, and ${data.strong} look${data.strong === 1 ? "s" : ""} strong (planet-like score above 50% after the checks, signal-to-noise above 10, three or more transits)` : ""}. None is a discovery yet: each needs checking by people and follow-up observations before anyone could call it a planet.`}
           </p>
+          {(data.singles ?? 0) > 0 && (
+            <p className="caps mt-2 max-w-[78ch] text-[12px] leading-relaxed text-ink/50">
+              Also {data.singles} lone {data.singles === 1 ? "dip" : "dips"} on stars with nothing known: one crossing each, so no period yet. Listed after the repeating signals.
+            </p>
+          )}
           {data.leads.length > 0 && (
             <ol className="mt-5 divide-y divide-ink/10 border-y border-ink/10">
               {data.leads.map((l, k) => {
                 const f = l.finding;
                 const i = l.investigation;
-                const strong = (f.score ?? 0) >= 0.5 && f.snr >= 10 && f.transits >= 3;
+                const strong = f.kind !== "single" && (f.scoreAfter ?? f.score ?? 0) >= 0.5 && f.snr >= 10 && f.transits >= 3;
                 return (
                   <li key={`${i.tic}-${k}`}>
                     <button type="button" onClick={() => setOpen(open === k ? null : k)} className="flex w-full flex-wrap items-baseline gap-x-4 gap-y-1 py-3 text-left">
                       <span className="w-6 font-mono text-[11px] text-ink/40">{String(k + 1).padStart(2, "0")}</span>
                       <span className="min-w-[150px] text-[15px] text-ink">{i.label}</span>
                       <span className="font-mono text-[10px] tracking-[0.12em] text-ink/50">
-                        {f.period.toFixed(3)} D · {depthText(f.depth)}
+                        {f.kind === "single" ? `SINGLE DIP · BTJD ${f.t0.toFixed(1)}` : `${f.period.toFixed(3)} D`} · {depthText(f.depth)}
                         {f.radiusEarth ? ` · ≈ ${f.radiusEarth.toFixed(1)} × EARTH` : ""}
                         {f.world ? ` · ${f.world.kind.toUpperCase()}` : ""}
                       </span>
                       <span className="ml-auto flex items-center gap-2 font-mono text-[10px] tracking-[0.12em]">
                         {i.reason === "candidate" && <span className="rounded-full border border-ink/20 px-2 py-0.5 text-ink/60">EXTRA SIGNAL ON A TOI STAR</span>}
                         {strong && <span className="rounded-full bg-gold px-2 py-0.5 text-void">STRONG</span>}
-                        <span className="text-gold">{f.score === null ? "—" : `${Math.round(f.score * 100)}%`}</span>
+                        <span className="text-gold">{f.score === null ? "—" : `${Math.round((f.scoreAfter ?? f.score) * 100)}%`}</span>
                       </span>
                     </button>
                     {open === k && (

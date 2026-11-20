@@ -25,11 +25,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isConfigured, pipeline } from "../lib/redis";
 import { dirname } from "node:path";
-import { bls, flatten, fromTransit, mask, measure, relation, EARTH_PER_SUN, type Curve } from "../lib/exoplanets";
+import { fromTransit, join, relation, searchOnce, EARTH_PER_SUN, type Curve, type Ephemeris } from "../lib/exoplanets";
 import { lightCurveFromFits } from "../lib/lightcurve";
 import { invoke, lightCurveFile, tessSectors, ticStar, type TicStar } from "../lib/mast";
-import { verdict, type Toi } from "../lib/verdict";
-import { planetScore, vetFeatures, type VetterModel } from "../lib/vetter";
+import { failedChecks, verdict, type Toi } from "../lib/verdict";
+import { afterChecks, planetScore, vetFeatures, type VetterModel } from "../lib/vetter";
 import { describe, KIND_LABEL } from "../lib/worlds";
 
 /** A file to write instead of Redis, for tests. */
@@ -38,7 +38,11 @@ const KEEP_REDIS = 500;
 const EXO = process.env.EXO_BASE ?? "https://exoplanetarchive.ipac.caltech.edu";
 const TARGETS = Number(process.env.WOBBLE_TARGETS ?? 8);
 const BLIND_SHARE = Math.min(1, Math.max(0, Number(process.env.WOBBLE_BLIND_SHARE ?? 0.75)));
-const SECTORS_PER_STAR = 3;
+/** More sectors reveal longer periods and shallower dips; the newest are used. */
+const SECTORS_PER_STAR = 6;
+/** Longest period searched, days, and the most trial frequencies (search time grows with both). */
+const MAX_PERIOD = 40;
+const MAX_FREQS = 150_000;
 const SEARCHES_PER_STAR = 3;
 const KEEP = 300;
 const AGENT = "Stellr Wobble";
@@ -55,6 +59,10 @@ interface Finding {
   sde: number;
   transits: number;
   score: number | null;
+  /** The vetter's score after the light-curve checks (lib/vetter.ts `afterChecks`). */
+  scoreAfter?: number | null;
+  /** How far from the target the dip's source seems to lie, pixels (21″ each), and its significance. */
+  centroid?: { offsetPx: number; sigma: number } | null;
   radiusEarth: number | null;
   world: { kind: string; teq: number; insolation: number; inZone: boolean } | null;
   /** The transit folded and averaged: hours from mid-transit, brightness. */
@@ -69,6 +77,8 @@ interface Investigation {
   reason: "candidate" | "blind";
   star: TicStar | null;
   sectors: number[];
+  /** Pipeline of each sector read: SPOC (2-minute) or a full-frame-image one (TESS-SPOC, QLP). */
+  pipelines?: string[];
   points: number;
   days: number;
   known: string[];
@@ -152,7 +162,7 @@ async function investigate(tic: string, label: string, reason: Investigation["re
   };
   try {
     const [sectors, star, knownRows, toiRows] = await Promise.all([
-      tessSectors(tic),
+      tessSectors(tic, 60_000),
       ticStar(tic).catch(() => null),
       tap(`select pl_name, pl_orbper from pscomppars where tic_id = 'TIC ${Number(tic)}'`).catch(() => []),
       tap(`select toi, tfopwg_disp, pl_orbper, pl_trandep, pl_trandurh from toi where tid = ${Number(tic)}`).catch(() => []),
@@ -171,33 +181,37 @@ async function investigate(tic: string, label: string, reason: Investigation["re
     const chosen = sectors.slice(-SECTORS_PER_STAR);
     if (!chosen.length) throw new Error("no TESS light curve");
     record.sectors = chosen.map((s) => s.sector);
+    record.pipelines = chosen.map((s) => s.pipeline);
     // A sector that fails (a missing file, a bad download) is skipped; the rest still count.
-    const parts = [];
+    const parts: Curve[] = [];
     const failures: string[] = [];
     for (const s of chosen) {
       try {
-        parts.push(lightCurveFromFits(await lightCurveFile(s.obsid, AGENT)));
+        const c = lightCurveFromFits(await lightCurveFile(s.obsid, AGENT));
+        parts.push({ t: Float64Array.from(c.t), f: Float64Array.from(c.f), ...(c.cx && c.cy ? { cx: Float64Array.from(c.cx), cy: Float64Array.from(c.cy) } : {}) });
       } catch (e) {
         failures.push(`sector ${s.sector}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
     if (!parts.length) throw new Error(failures.join("; "));
     if (failures.length) record.skipped = failures.join("; ");
-    parts.sort((a, b) => a.t[0] - b.t[0]);
-    const curve: Curve = { t: Float64Array.from(parts.flatMap((p) => p.t)), f: Float64Array.from(parts.flatMap((p) => p.f)) };
+    const curve = join(parts);
     record.points = curve.t.length;
     record.days = round(curve.t[curve.t.length - 1] - curve.t[0], 1);
 
-    let search = flatten(curve);
+    const found: Ephemeris[] = [];
+    let lastFlat: Curve = curve;
+    let singles: ReturnType<typeof searchOnce>["singles"] = [];
     for (let round_ = 0; round_ < SEARCHES_PER_STAR; round_++) {
-      const result = bls(search);
-      const checks = result ? measure(search, result.period, result.t0, result.duration) : null;
+      const { flat, result, checks, singles: lone } = searchOnce(curve, found, { maxP: MAX_PERIOD, maxFreqs: MAX_FREQS });
+      lastFlat = flat;
+      singles = lone;
       const x = result && model ? vetFeatures(result.period, result.duration, result.depth, star ? { radius: star.radius, teff: star.teff, logg: star.logg } : null) : null;
       const score = model && x ? planetScore(model, x) : null;
       const v = verdict({ result, checks }, known, tois, star?.radius ?? null, score);
       // The same period (or a simple multiple) again means masking didn't remove it: a smooth variation, not new dips.
       if (result && record.findings.some((f) => relation(result.period, f.period))) break;
-      if (v.kind === "none" || !result) {
+      if (v.kind === "none" || !result || !checks) {
         if (round_ === 0) record.quiet = result ? { sde: round(result.sde, 1), snr: round(result.snr, 1) } : null;
         break;
       }
@@ -218,11 +232,37 @@ async function investigate(tic: string, label: string, reason: Investigation["re
         sde: round(result.sde, 1),
         transits: result.transits,
         score: score === null ? null : round(score, 3),
+        scoreAfter: score === null ? null : round(afterChecks(score, failedChecks(result, checks, star?.radius ?? null)), 3),
+        centroid: checks.centroid ? { offsetPx: round(checks.centroid.offsetPx, 2), sigma: round(checks.centroid.sigma, 1) } : null,
         radiusEarth: radiusEarth ? round(radiusEarth, 2) : null,
         world: world ? { kind: KIND_LABEL[world.kind], teq: Math.round(world.teq), insolation: round(world.insolation, 2), inZone: world.inZone } : null,
-        fold: foldOf(search, result.period, result.t0, result.duration),
+        fold: foldOf(flat, result.period, result.t0, result.duration),
       });
-      search = mask(search, result.period, result.t0, result.duration);
+      found.push({ period: result.period, t0: result.t0, duration: result.duration });
+    }
+    // Lone dips left once every periodic signal is hidden: a long orbit seen once. Not on a star
+    // with a deep signal already ruled out (an eclipsing binary), whose leftovers would show here.
+    const binaryLike = record.findings.some((f) => f.kind === "doubt" && f.depth > 0.005);
+    for (const d of binaryLike ? [] : singles) {
+      const radiusEarth = star?.radius ? Math.sqrt(d.depth) * star.radius * EARTH_PER_SUN : null;
+      record.findings.push({
+        kind: "single",
+        title: "SINGLE DIP · PERIOD UNKNOWN",
+        notes: [
+          `One ${Math.round(d.depth * 1e6).toLocaleString("en")} ppm dip, ${d.duration} h long, at BTJD ${d.t0.toFixed(2)}, seen once in ${record.days} days of data. A planet on a long orbit can cross only once; so can a stray systematic. More TESS sectors would tell.`,
+        ],
+        period: 0,
+        t0: round(d.t0),
+        duration: d.duration,
+        depth: round(d.depth, 7),
+        snr: round(d.snr, 1),
+        sde: 0,
+        transits: 1,
+        score: null,
+        radiusEarth: radiusEarth ? round(radiusEarth, 2) : null,
+        world: null,
+        fold: foldOf(lastFlat, 1e6, d.t0, d.duration),
+      });
     }
   } catch (error) {
     record.error = error instanceof Error ? error.message : String(error);
@@ -257,7 +297,7 @@ async function main() {
    */
   const eligible = async (tic: string, blind: boolean) => {
     try {
-      const sectors = (await tessSectors(tic)).length;
+      const sectors = (await tessSectors(tic, 60_000)).length;
       if (!sectors || !blind) return sectors;
       const s = await ticStar(tic);
       return s && s.tmag !== null && s.tmag <= 13 && s.radius !== null && s.radius < 2.5 ? sectors : 0;
@@ -283,19 +323,25 @@ async function main() {
   }
   // The rest: stars watched closely in a sector, with nothing known about them.
   const sector = 1 + Math.floor(rnd() * Math.max(1, latestSector()));
-  const watched = await invoke({
-    service: "Mast.Caom.Filtered",
-    params: {
-      columns: "target_name",
-      filters: [
-        { paramName: "obs_collection", values: ["TESS"] },
-        { paramName: "dataproduct_type", values: ["timeseries"] },
-        { paramName: "provenance_name", values: ["SPOC"] },
-        { paramName: "sequence_number", values: [{ min: sector, max: sector }] },
-        { paramName: "t_exptime", values: [{ min: 119, max: 121 }] },
-      ],
-    },
-  }).catch(() => []);
+  // Stars with 2-minute light curves, and stars with full-frame-image light curves from
+  // TESS-SPOC: the second pool is far larger and far less searched by eye.
+  const pool = async (collection: string, provenance: string) =>
+    invoke(
+      {
+        service: "Mast.Caom.Filtered",
+        params: {
+          columns: "target_name",
+          filters: [
+            { paramName: "obs_collection", values: [collection] },
+            { paramName: "dataproduct_type", values: ["timeseries"] },
+            { paramName: "provenance_name", values: [provenance] },
+            { paramName: "sequence_number", values: [{ min: sector, max: sector }] },
+          ],
+        },
+      },
+      60_000,
+    ).catch(() => []);
+  const watched = [...(await pool("TESS", "SPOC")), ...(await pool("HLSP", "TESS-SPOC"))];
   const quiet = shuffle(
     [...new Set(watched.map((r) => String(r.target_name ?? "")))].filter((t) => /^\d+$/.test(t) && !toiStars.has(t) && !hosts.has(t) && !seen.has(t)),
     rnd,

@@ -5,13 +5,13 @@
  */
 export const MAST = process.env.MAST_BASE ?? "https://mast.stsci.edu";
 
-export async function invoke(request: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+export async function invoke(request: Record<string, unknown>, timeoutMs = 25_000): Promise<Record<string, unknown>[]> {
   const res = await fetch(`${MAST}/api/v0/invoke`, {
     method: "POST",
     cache: "no-store",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json", "User-Agent": "Stellr Exoplanet Lab" },
     body: `request=${encodeURIComponent(JSON.stringify({ format: "json", pagesize: 2000, ...request }))}`,
-    signal: AbortSignal.timeout(25_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`MAST ${res.status}: ${(await res.text()).slice(0, 160)}`);
   const data = (await res.json()) as { status?: string; msg?: string; data?: Record<string, unknown>[] };
@@ -26,34 +26,43 @@ export interface Sector {
   pipeline: string;
 }
 
+/** Light-curve pipelines Stellr reads, best first: the mission's 2-minute and 20-second light curves, then two full-frame-image pipelines. */
+const PIPELINES = ["SPOC", "TESS-SPOC", "QLP"] as const;
+
 /**
  * The TESS sectors with a light curve for a star: for each, the observation to fetch,
- * preferring the mission's own 2-minute pipeline (SPOC) and falling back to its
- * full-frame-image light curves (TESS-SPOC).
+ * preferring the mission's own 2-minute pipeline (SPOC), then its full-frame-image light
+ * curves (TESS-SPOC), then MIT's Quick-Look Pipeline (QLP). The full-frame ones are high-level
+ * science products (MAST's HLSP collection), and cover far more stars and sectors than SPOC.
  */
-export async function tessSectors(tic: string): Promise<Sector[]> {
-  const rows = await invoke({
-    service: "Mast.Caom.Filtered",
-    params: {
-      columns: "obsid,obs_id,sequence_number,provenance_name,t_exptime,target_name",
-      filters: [
-        { paramName: "obs_collection", values: ["TESS"] },
-        { paramName: "dataproduct_type", values: ["timeseries"] },
-        { paramName: "target_name", values: [String(Number(tic))] },
-      ],
+export async function tessSectors(tic: string, timeoutMs?: number): Promise<Sector[]> {
+  const rows = await invoke(
+    {
+      service: "Mast.Caom.Filtered",
+      params: {
+        columns: "obsid,obs_id,sequence_number,provenance_name,t_exptime,target_name",
+        filters: [
+          { paramName: "obs_collection", values: ["TESS", "HLSP"] },
+          { paramName: "dataproduct_type", values: ["timeseries"] },
+          { paramName: "provenance_name", values: [...PIPELINES] },
+          { paramName: "target_name", values: [String(Number(tic))] },
+        ],
+      },
     },
-  });
+    timeoutMs,
+  );
   const rank = (r: Record<string, unknown>) => {
     const p = String(r.provenance_name ?? "");
     const exp = Number(r.t_exptime);
     if (p === "SPOC") return exp === 120 ? 0 : exp === 20 ? 1 : 2;
-    return p === "TESS-SPOC" ? 3 : 9;
+    if (p === "TESS-SPOC") return 3;
+    return p === "QLP" ? 4 : 9;
   };
   const best = new Map<number, Record<string, unknown>>();
   for (const r of rows) {
     const sector = Number(r.sequence_number);
     // Multi-sector validation reports (an obs_id spanning sectors, e.g. "-s0014-s0086-") carry no light curve.
-    if (!Number.isFinite(sector) || rank(r) > 3 || /-s\d{4}-s\d{4}-/.test(String(r.obs_id ?? ""))) continue;
+    if (!Number.isFinite(sector) || rank(r) > 4 || /-s\d{4}-s\d{4}-/.test(String(r.obs_id ?? ""))) continue;
     const have = best.get(sector);
     if (!have || rank(r) < rank(have)) best.set(sector, r);
   }
@@ -64,7 +73,8 @@ export async function tessSectors(tic: string): Promise<Sector[]> {
 
 /** One observation's light-curve file, downloaded from MAST. */
 export async function lightCurveFile(obsid: string, agent = "Stellr Exoplanet Lab"): Promise<ArrayBuffer> {
-  const products = await invoke({ service: "Mast.Caom.Products", params: { obsid } });
+  // MAST can take twenty seconds or more to list an observation's files.
+  const products = await invoke({ service: "Mast.Caom.Products", params: { obsid } }, 55_000);
   const lc =
     products.find((p) => /_lc\.fits$/i.test(String(p.productFilename ?? "")) && String(p.productSubGroupDescription ?? "LC") === "LC") ??
     products.find((p) => /lc\.fits$/i.test(String(p.productFilename ?? "")));
@@ -75,7 +85,7 @@ export async function lightCurveFile(obsid: string, agent = "Stellr Exoplanet La
   const res = await fetch(`${MAST}/api/v0.1/Download/file?uri=${encodeURIComponent(String(lc.dataURI))}`, {
     cache: "no-store",
     headers: { "User-Agent": agent },
-    signal: AbortSignal.timeout(40_000),
+    signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) throw new Error(`MAST download ${res.status}`);
   return res.arrayBuffer();
@@ -100,7 +110,7 @@ export async function ticStar(tic: string): Promise<TicStar | null> {
   const rows = await invoke({
     service: "Mast.Catalogs.Filtered.Tic",
     params: { columns: "ID,Teff,logg,rad,mass,Tmag,d", filters: [{ paramName: "ID", values: [String(Number(tic))] }] },
-  });
+  }, 45_000);
   const r = rows[0];
   if (!r) return null;
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);

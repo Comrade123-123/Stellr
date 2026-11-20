@@ -42,9 +42,10 @@ const SIZES: Record<string, number> = { L: 1, X: 1, B: 1, I: 2, J: 4, K: 8, A: 1
 
 /**
  * The named numeric columns (first element of each) of the first binary table in the file,
- * as Float64Arrays, plus that table's header.
+ * as Float64Arrays, plus that table's header and the names of every column in it. Columns
+ * in `optional` are read when present and left out when not.
  */
-export function readTable(buffer: ArrayBuffer, names: string[]) {
+export function readTable(buffer: ArrayBuffer, names: string[], optional: string[] = []) {
   const bytes = new Uint8Array(buffer);
   const view = new DataView(buffer);
   let at = 0;
@@ -71,9 +72,12 @@ export function readTable(buffer: ArrayBuffer, names: string[]) {
         offset += width;
       }
       const out: Record<string, Float64Array> = {};
-      for (const name of names) {
+      for (const name of [...names, ...optional]) {
         const col = columns.get(name.toUpperCase());
-        if (!col) throw new Error(`FITS: no ${name} column`);
+        if (!col) {
+          if (optional.includes(name)) continue;
+          throw new Error(`FITS: no ${name} column`);
+        }
         const values = new Float64Array(rows);
         for (let r = 0; r < rows; r++) {
           const p = end + r * rowBytes + col.offset;
@@ -102,7 +106,7 @@ export function readTable(buffer: ArrayBuffer, names: string[]) {
         }
         out[name] = values;
       }
-      return { header, columns: out };
+      return { header, columns: out, names: [...columns.keys()] };
     }
     at = end + Math.ceil(size / BLOCK) * BLOCK;
   }

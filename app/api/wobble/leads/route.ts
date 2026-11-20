@@ -16,9 +16,11 @@ const PRIVATE = { "Cache-Control": "private, no-store" };
 interface Finding {
   kind: string;
   score: number | null;
+  scoreAfter?: number | null;
   snr: number;
   transits: number;
   period: number;
+  t0: number;
 }
 
 export async function GET(request: Request) {
@@ -40,7 +42,7 @@ export async function GET(request: Request) {
           signals++;
           if (f.kind === "known" || f.kind === "alias" || f.kind === "toi") recovered++;
           if (f.kind === "doubt") ruledOut++;
-          if (f.kind === "candidate") {
+          if (f.kind === "candidate" || f.kind === "single") {
             const { findings: _all, ...rest } = r;
             void _all;
             leads.push({ investigation: rest, finding: f });
@@ -51,9 +53,10 @@ export async function GET(request: Request) {
     }
     // The same star re-checked on another day may give the same signal twice: keep the stronger.
     const best = new Map<string, (typeof leads)[number]>();
-    const strength = (f: Finding) => (f.score ?? 0) * 100 + Math.min(f.snr, 99) / 100;
+    // Periodic candidates rank above single dips; then the vetter's score after checks, then signal-to-noise.
+    const strength = (f: Finding) => (f.kind === "single" ? 0 : 1000) + (f.scoreAfter ?? f.score ?? 0) * 100 + Math.min(f.snr, 99) / 100;
     for (const l of leads) {
-      const key = `${l.investigation.tic}:${l.finding.period.toFixed(2)}`;
+      const key = `${l.investigation.tic}:${l.finding.kind === "single" ? `s${l.finding.t0.toFixed(1)}` : l.finding.period.toFixed(2)}`;
       const had = best.get(key);
       if (!had || strength(l.finding) > strength(had.finding)) best.set(key, l);
     }
@@ -64,8 +67,9 @@ export async function GET(request: Request) {
         signals,
         recovered,
         ruledOut,
-        candidates: ranked.length,
-        strong: ranked.filter((l) => (l.finding.score ?? 0) >= 0.5 && l.finding.snr >= 10 && l.finding.transits >= 3).length,
+        candidates: ranked.filter((l) => l.finding.kind !== "single").length,
+        singles: ranked.filter((l) => l.finding.kind === "single").length,
+        strong: ranked.filter((l) => l.finding.kind !== "single" && (l.finding.scoreAfter ?? l.finding.score ?? 0) >= 0.5 && l.finding.snr >= 10 && l.finding.transits >= 3).length,
         leads: ranked.slice(0, MAX_LEADS),
       },
       { headers: PRIVATE },

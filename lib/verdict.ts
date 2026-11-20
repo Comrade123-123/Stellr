@@ -31,6 +31,22 @@ export const MIN_SNR = 7;
 /** Below this ML score a signal that passes the checks is only a weak candidate. */
 export const WEAK_SCORE = 0.2;
 
+/** The dip's source lies over a pixel (21″) from the target, at more than 3σ. */
+export const centroidMoves = (c: Checks) => !!c.centroid && c.centroid.offsetPx > 1 && c.centroid.offsetPx > 3 * c.centroid.offsetErr && c.centroid.sigma > 3;
+
+/** How many of the hard checks a signal fails: each one a known way for a non-planet to mimic a transit. */
+export function failedChecks(r: BlsResult, c: Checks, starRadius: number | null = null) {
+  let n = 0;
+  const oe = Math.abs(c.odd.depth - c.even.depth) / Math.hypot(c.odd.err, c.even.err);
+  if (c.odd.n && c.even.n && oe > 3) n++;
+  if (c.secondary.n && c.secondary.depth / c.secondary.err > 3) n++;
+  if (c.shape.core > 0 && c.shape.edge < 0.5 * c.shape.core && (c.shape.core - c.shape.edge) / c.shape.err > 3) n++;
+  if (c.variability.amplitude > Math.max(0.5 * r.depth, c.variability.noise)) n++;
+  if (centroidMoves(c)) n++;
+  if (starRadius && r.duration > 1.5 * longestTransit(r.period, starRadius)) n++;
+  return n;
+}
+
 /** What a signal most likely is, by the checks this lab can run. Never "confirmed". */
 export function verdict(s: { result: BlsResult | null; checks: Checks | null }, known: { name: string; period: number | null }[], tois: Toi[] = [], starRadius: number | null = null, score: number | null = null) {
   const r = s.result;
@@ -63,6 +79,7 @@ export function verdict(s: { result: BlsResult | null; checks: Checks | null }, 
   }
   if (c.variability.amplitude > Math.max(0.5 * r.depth, c.variability.noise))
     notes.push("The star brightens and dims on this same period away from the dip too: more like spots, pulsation or a close binary star than a transit.");
+  if (centroidMoves(c)) notes.push(`The star's light centre shifts during the dip, as if the dimming came from about ${(c.centroid!.offsetPx * 21).toFixed(0)}″ away: likely a neighbouring star blended into the light curve.`);
   if (r.transits < 3) notes.push("Fewer than three transits: the period is uncertain.");
   if (notes.length) return { kind: "doubt" as const, title: "SIGNAL · PROBABLY NOT A PLANET", notes };
   if (toi) {

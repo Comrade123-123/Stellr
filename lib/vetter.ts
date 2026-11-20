@@ -110,3 +110,16 @@ export function planetScore(model: VetterModel, x: number[]) {
   }
   return 1 / (1 + Math.exp(-raw));
 }
+
+/**
+ * The vetter's score after the light-curve checks. The model sees only a signal's period,
+ * depth, duration and star, so it can rate a signal planet-like that the checks show isn't
+ * (odd and even transits that differ, a moving centroid…). Each failed check is strong
+ * evidence against a planet: here it cuts the odds tenfold, roughly how often such a failure
+ * turned out a false positive in Kepler's vetting.
+ */
+export function afterChecks(score: number, failed: number) {
+  if (!failed) return score;
+  const odds = (score / Math.max(1 - score, 1e-6)) * Math.pow(0.1, failed);
+  return odds / (1 + odds);
+}

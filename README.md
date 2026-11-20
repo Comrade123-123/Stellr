@@ -27,17 +27,28 @@ profile; `/privacy` and `/terms` say what is kept.
 
 ### Exoplanet Lab in more detail
 
-1. **Light curve.** TESS 2-minute light curves (PDCSAP flux, good-quality points) are read
-   straight from the FITS files on MAST, normalised and binned to 10 minutes.
-2. **Period search.** A running-median filter flattens the curve, then Box Least Squares
-   (Kovács et al. 2002) searches it in a Web Worker, scored by SDE and SNR. Found signals can be
-   masked to search for more.
-3. **Checks.** Odd/even depth, secondary eclipse, V-shape, depth, duration against the longest
-   transit the star allows, implied size, variability away from the dip, number of transits, and
-   cross-matches with known planets and TESS Objects of Interest.
-4. **ML vetter.** A gradient-boosted tree model trained on labelled Kepler and TESS signals from
-   the NASA Exoplanet Archive scores how planet-like the signal is (held-out TESS AUC 0.91).
-5. **The world.** Radius, orbit, insolation, equilibrium temperature, habitable zone and an
+1. **Light curve.** Each TESS sector from the best pipeline that has it: the mission's own
+   2-minute light curves (SPOC), then full-frame-image light curves from TESS-SPOC and MIT's
+   Quick-Look Pipeline (QLP), which cover far more stars and sectors. Good-quality points,
+   normalised and binned to 10 minutes, with the star's light centre (centroid) where the file
+   has it. Read straight from the FITS files on MAST.
+2. **Clean-up.** A sliding Tukey biweight filter (as in Wōtan, Hippke et al. 2019) removes the
+   star's slow variations. Once a signal is found, the curve is cleaned again with its transits
+   kept out of the trend, so they aren't partly flattened away.
+3. **Period search.** Box Least Squares (Kovács et al. 2002) in a Web Worker, scored by SDE
+   and SNR, then a transit-shaped refit around the peak, after Transit Least Squares (Hippke &
+   Heller 2019): sloped ingress and egress and a limb-darkened bottom, for truer depths and
+   durations. Found signals are masked to search for more, and lone dips that never repeat are
+   listed separately (a long orbit can cross only once).
+4. **Checks.** Odd/even depth, secondary eclipse, V-shape, depth, duration against the longest
+   transit the star allows, implied size, variability away from the dip, number of transits, a
+   centroid check (does the light's centre move during the dip, as when a neighbouring star is
+   the one dimming?), and cross-matches with known planets and TESS Objects of Interest.
+5. **ML vetter.** A gradient-boosted tree model trained on labelled Kepler and TESS signals from
+   the NASA Exoplanet Archive scores how planet-like the signal is (held-out TESS AUC 0.91). It
+   sees only period, depth, duration and the star, so each failed check then cuts its odds
+   tenfold ("after the checks").
+6. **The world.** Radius, orbit, insolation, equilibrium temperature, habitable zone and an
    illustration from the fitted numbers. Planets known only from radial velocity get a predicted
    radius (Chen & Kipping 2017) and transit odds.
 
@@ -106,8 +117,9 @@ and picture, and an account can be deleted from its page.
 ### Wobble
 
 Wobble runs in GitHub Actions (`.github/workflows/wobble.yml`), daily at 02:41 UTC or on demand.
-Each run picks stars (three quarters stars nobody has checked, preferring those TESS watched in two or more sectors; a quarter TESS planet candidates), searches up to
-three sectors each with Exoplanet Lab's pipeline, and writes what it finds to Redis. The
+Each run picks stars (three quarters stars nobody has checked, from both the 2-minute and the
+full-frame-image targets, preferring those TESS watched in two or more sectors; a quarter TESS
+planet candidates), searches up to six sectors each with Exoplanet Lab's pipeline, and writes what it finds to Redis. The
 repository is public, so findings never go into the repo or the Actions logs; the logs show
 counts only.
 

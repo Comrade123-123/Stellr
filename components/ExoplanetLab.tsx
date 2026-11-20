@@ -11,6 +11,7 @@ import {
   EARTH_PER_SUN,
   MAX_PLANET_RADIUS,
   fromTransit,
+  join,
   longestTransit,
   planetFromRow,
   relation,
@@ -18,9 +19,10 @@ import {
   type Checks,
   type Curve,
   type Planet,
+  type SingleDip,
 } from "@/lib/exoplanets";
-import { DISPOSITIONS, MIN_SDE, MIN_SNR, verdict, type Toi } from "@/lib/verdict";
-import { planetScore, vetFeatures, type StarParams, type VetterModel } from "@/lib/vetter";
+import { DISPOSITIONS, MIN_SDE, MIN_SNR, centroidMoves, failedChecks, verdict, type Toi } from "@/lib/verdict";
+import { afterChecks, planetScore, vetFeatures, type StarParams, type VetterModel } from "@/lib/vetter";
 import { describe, KIND_LABEL, radiusFromMass, transitForecast } from "@/lib/worlds";
 
 type Load = "idle" | "loading" | "ready" | "error";
@@ -73,6 +75,8 @@ interface Signal {
   flat: Curve;
   result: BlsResult | null;
   checks: Checks | null;
+  /** Lone dips left once this and earlier signals are hidden. */
+  singles?: SingleDip[];
 }
 
 const GOLD = "#c9a46a";
@@ -270,25 +274,16 @@ export default function ExoplanetLab() {
         const hit = sectorCache.current.get(s.obsid);
         if (hit) return hit;
         const res = await fetch(`/api/exoplanets/lightcurve?obsid=${s.obsid}`);
-        const data = (await res.json()) as { t?: number[]; f?: number[]; error?: boolean; detail?: string };
+        const data = (await res.json()) as { t?: number[]; f?: number[]; cx?: number[]; cy?: number[]; error?: boolean; detail?: string };
         if (!res.ok || data.error || !data.t || !data.f) throw new Error(data.detail ?? `HTTP ${res.status}`);
-        const c = { t: Float64Array.from(data.t), f: Float64Array.from(data.f) };
+        const c: Curve = { t: Float64Array.from(data.t), f: Float64Array.from(data.f), ...(data.cx && data.cy ? { cx: Float64Array.from(data.cx), cy: Float64Array.from(data.cy) } : {}) };
         sectorCache.current.set(s.obsid, c);
         return c;
       }),
     )
       .then((parts) => {
         if (cancelled) return;
-        const n = parts.reduce((a, p) => a + p.t.length, 0);
-        const t = new Float64Array(n);
-        const f = new Float64Array(n);
-        let k = 0;
-        for (const p of [...parts].sort((a, b) => a.t[0] - b.t[0])) {
-          t.set(p.t, k);
-          f.set(p.f, k);
-          k += p.t.length;
-        }
-        setCurve({ t, f });
+        setCurve(join(parts));
         setSignals([]);
         setCurveLoad("ready");
       })
@@ -307,10 +302,10 @@ export default function ExoplanetLab() {
     worker.current ??= new Worker(new URL("../lib/bls.worker.ts", import.meta.url), { type: "module" });
     setSearching(0);
     setSearchError("");
-    worker.current.onmessage = (e: MessageEvent<{ type: string; value?: number; flat?: Curve; result?: BlsResult | null; checks?: Checks | null; message?: string }>) => {
+    worker.current.onmessage = (e: MessageEvent<{ type: string; value?: number; flat?: Curve; result?: BlsResult | null; checks?: Checks | null; singles?: SingleDip[]; message?: string }>) => {
       if (e.data.type === "progress") setSearching(e.data.value ?? 0);
       else if (e.data.type === "result") {
-        setSignals([...masks, { flat: e.data.flat!, result: e.data.result ?? null, checks: e.data.checks ?? null }]);
+        setSignals([...masks, { flat: e.data.flat!, result: e.data.result ?? null, checks: e.data.checks ?? null, singles: e.data.singles ?? [] }]);
         setSearching(null);
       } else {
         setSearchError(e.data.message ?? "search failed");
@@ -320,6 +315,7 @@ export default function ExoplanetLab() {
     worker.current.postMessage({
       t: curve.t,
       f: curve.f,
+      ...(curve.cx && curve.cy ? { cx: curve.cx, cy: curve.cy } : {}),
       masks: masks.filter((s) => s.result).map((s) => ({ period: s.result!.period, t0: s.result!.t0, duration: s.result!.duration })),
     });
   };
@@ -781,12 +777,13 @@ export default function ExoplanetLab() {
                             className={chip(on)}
                           >
                             {s.sector}
+                            {s.pipeline !== "SPOC" && <span className="ml-1 opacity-60">FFI</span>}
                           </button>
                         );
                       })}
                     </div>
                     <p className="mt-2 font-mono text-[10px] tracking-[0.12em] text-ink/40">
-                      EACH SECTOR IS ~27 DAYS OF WATCHING. MORE SECTORS FIND LONGER PERIODS AND SHALLOWER DIPS, BUT SEARCH SLOWER.
+                      EACH SECTOR IS ~27 DAYS OF WATCHING. MORE SECTORS FIND LONGER PERIODS AND SHALLOWER DIPS, BUT SEARCH SLOWER. FFI: FROM TESS&apos;S FULL-FRAME IMAGES (TESS-SPOC OR QLP), 10- OR 30-MINUTE CADENCE.
                     </p>
                   </>
                 )}
@@ -935,6 +932,22 @@ export default function ExoplanetLab() {
                     </li>
                   ))}
                 </ul>
+                {latest?.singles && latest.singles.length > 0 && (
+                  <div className="mt-6 border-t border-ink/10 pt-5">
+                    <p className="font-mono text-[10px] tracking-[0.22em] text-gold">LONE DIPS · SEEN ONCE</p>
+                    <p className="caps mt-2 max-w-[80ch] text-[11px] leading-relaxed text-ink/55">
+                      With every repeating signal hidden, these dips remain. A planet on a long orbit may cross only once while TESS watches; so can a stray systematic. Check whether they line up with another sector.
+                    </p>
+                    <ul className="mt-3 space-y-1.5 font-mono text-[11px] tracking-[0.06em] text-ink/80">
+                      {latest.singles.map((d) => (
+                        <li key={d.t0}>
+                          BTJD {d.t0.toFixed(2)} · {Math.round(d.depth * 1e6).toLocaleString("en")} PPM · {d.duration} H · SNR {d.snr.toFixed(1)}
+                          {starRadius ? ` · ≈ ${(Math.sqrt(d.depth) * starRadius * EARTH_PER_SUN).toFixed(1)} × EARTH` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </Section>
             )}
 
@@ -961,11 +974,20 @@ export default function ExoplanetLab() {
                       "FLAT AWAY FROM THE DIP",
                       `${depthText(c.variability.amplitude)} swing around the orbit`,
                     ]);
+                    rows.push(
+                      c.centroid
+                        ? [
+                            !centroidMoves(c),
+                            "LIGHT COMES FROM THIS STAR",
+                            `centroid shift ${c.centroid.sigma.toFixed(1)}σ · source ~${(c.centroid.offsetPx * 21).toFixed(0)}″ ± ${(c.centroid.offsetErr * 21).toFixed(0)}″ away`,
+                          ]
+                        : [true, "LIGHT COMES FROM THIS STAR", "no centroid in these light curves: not checked"],
+                    );
                     const R = starRadius;
                     if (R) {
                       const longest = longestTransit(latest.result!.period, R);
                       const size = Math.sqrt(latest.result!.depth) * R * EARTH_PER_SUN;
-                      rows.push([latest.result!.duration <= 1.5 * longest, "SHORT ENOUGH FOR AN ORBIT", `${latest.result!.duration.toFixed(1)} h · up to ~${longest.toFixed(1)} h here`]);
+                      rows.push([latest.result!.duration <= 1.5 * longest, "SHORT ENOUGH FOR AN ORBIT", `${latest.result!.duration.toFixed(1)} h · ~${longest.toFixed(1)} h across the middle, up to ~${(1.5 * longest).toFixed(1)} h allowed for the star's uncertain size`]);
                       rows.push([size <= MAX_PLANET_RADIUS, "PLANET-SIZED", `≈ ${size.toFixed(1)} × Earth`]);
                     }
                     const toi = tois.find((x) => x.period && relation(latest.result!.period, x.period) === "same period");
@@ -993,6 +1015,16 @@ export default function ExoplanetLab() {
                       <div className="mt-2 h-1.5 w-full max-w-[420px] rounded-full bg-ink/10" role="meter" aria-valuenow={Math.round(score(latest)! * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Planet-like score">
                         <div className="h-1.5 rounded-full bg-gold" style={{ width: `${score(latest)! * 100}%` }} />
                       </div>
+                      {(() => {
+                        const failed = failedChecks(latest.result!, latest.checks!, starRadius);
+                        if (!failed) return <p className="mt-2 font-mono text-[10px] tracking-[0.12em] text-ink/45">PASSES EVERY CHECK ABOVE, SO THE SCORE STANDS.</p>;
+                        const adj = afterChecks(score(latest)!, failed);
+                        return (
+                          <p className="mt-2 font-mono text-[10px] tracking-[0.12em] text-gold">
+                            AFTER THE CHECKS: {Math.round(adj * 100)}% · {failed} FAILED CHECK{failed > 1 ? "S" : ""}, EACH CUTTING THE ODDS TENFOLD. THE MODEL ONLY SEES PERIOD, DEPTH, DURATION AND THE STAR, NOT THE LIGHT CURVE&apos;S SHAPE.
+                          </p>
+                        );
+                      })()}
                       <p className="caps mt-3 max-w-[70ch] text-[11px] leading-relaxed text-ink/55">
                         {model.version === 2 ? (
                           <>
