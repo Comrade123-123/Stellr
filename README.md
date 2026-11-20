@@ -106,7 +106,7 @@ and picture, and an account can be deleted from its page.
 ### Wobble
 
 Wobble runs in GitHub Actions (`.github/workflows/wobble.yml`), daily at 02:41 UTC or on demand.
-Each run picks stars (half TESS planet candidates, half stars nobody has checked), searches up to
+Each run picks stars (three quarters stars nobody has checked, preferring those TESS watched in two or more sectors; a quarter TESS planet candidates), searches up to
 three sectors each with Exoplanet Lab's pipeline, and writes what it finds to Redis. The
 repository is public, so findings never go into the repo or the Actions logs; the logs show
 counts only.

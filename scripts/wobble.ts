@@ -5,10 +5,12 @@
  * .github/workflows/wobble.yml. The repository and its Actions logs are public, so findings
  * go only to Redis and the log prints counts, never results.
  *
- * Each run looks at two kinds of star:
- *  - TESS Objects of Interest still marked "planet candidate", re-examined independently;
+ * Each run looks at two kinds of star, mostly the second:
+ *  - TESS Objects of Interest still marked "planet candidate", re-examined independently
+ *    (a quarter of the run by default);
  *  - stars TESS watched closely (2-minute cadence) with no known planet and no TOI, searched
- *    blind for anything new.
+ *    blind for anything new; those watched in two or more sectors come first, as more time on
+ *    a star is what reveals longer periods and shallower dips.
  * For each it loads up to three sectors, flattens them, searches with Box Least Squares up to
  * three times (hiding each signal before looking for the next), and judges every signal with
  * the shared checks (lib/verdict.ts), the ML vetter and the star's catalogue values.
@@ -16,7 +18,8 @@
  *     npx tsx scripts/wobble.ts            (writes to Redis: UPSTASH_REDIS_REST_URL / _TOKEN)
  *     npx tsx scripts/wobble.ts out.json   (tests: writes a file instead)
  *
- * WOBBLE_TARGETS sets how many stars per run (default 8); EXO_BASE and MAST_BASE point it at
+ * WOBBLE_TARGETS sets how many stars per run (default 8) and WOBBLE_BLIND_SHARE the share of
+ * them searched blind (default 0.75); EXO_BASE and MAST_BASE point it at
  * local stand-ins for tests.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -34,6 +37,7 @@ const FILE = process.argv[2] ?? null;
 const KEEP_REDIS = 500;
 const EXO = process.env.EXO_BASE ?? "https://exoplanetarchive.ipac.caltech.edu";
 const TARGETS = Number(process.env.WOBBLE_TARGETS ?? 8);
+const BLIND_SHARE = Math.min(1, Math.max(0, Number(process.env.WOBBLE_BLIND_SHARE ?? 0.75)));
 const SECTORS_PER_STAR = 3;
 const SEARCHES_PER_STAR = 3;
 const KEEP = 300;
@@ -247,22 +251,24 @@ async function main() {
   const hosts = new Set((await tap("select distinct tic_id from pscomppars where tic_id is not null")).map((r) => String(r.tic_id ?? "").replace(/^TIC\s*/i, "")));
 
   /**
-   * Worth an investigation: TESS has a light curve for it and, for a blind search, it is a
-   * dwarf star (under 2.5 solar radii) bright enough (TESS magnitude ≤ 13) for small dips to show.
+   * How many TESS sectors a star worth investigating has (0 if it isn't): it needs a light
+   * curve and, for a blind search, must be a dwarf (under 2.5 solar radii) bright enough
+   * (TESS magnitude ≤ 13) for small dips to show.
    */
   const eligible = async (tic: string, blind: boolean) => {
     try {
-      if (!(await tessSectors(tic)).length) return false;
-      if (!blind) return true;
+      const sectors = (await tessSectors(tic)).length;
+      if (!sectors || !blind) return sectors;
       const s = await ticStar(tic);
-      return !!s && s.tmag !== null && s.tmag <= 13 && s.radius !== null && s.radius < 2.5;
+      return s && s.tmag !== null && s.tmag <= 13 && s.radius !== null && s.radius < 2.5 ? sectors : 0;
     } catch {
-      return false;
+      return 0;
     }
   };
   const MAX_TRIES = 40;
+  const toiPicks = Math.round(TARGETS * (1 - BLIND_SHARE));
 
-  // Half the run: open planet candidates, re-examined.
+  // A share of the run: open planet candidates, re-examined.
   const pcs = shuffle(
     tois.filter((r) => r.tfopwg_disp === "PC" && !seen.has(String(r.tid))),
     rnd,
@@ -270,7 +276,7 @@ async function main() {
   const picks: { tic: string; label: string; reason: Investigation["reason"] }[] = [];
   let tries = 0;
   for (const r of pcs) {
-    if (picks.length >= Math.ceil(TARGETS / 2) || tries++ >= MAX_TRIES) break;
+    if (picks.length >= toiPicks || tries++ >= MAX_TRIES) break;
     const t = String(r.tid);
     if (picks.some((p) => p.tic === t) || !(await eligible(t, false))) continue;
     picks.push({ tic: t, label: `TOI-${Math.floor(Number(r.toi))}`, reason: "candidate" });
@@ -294,10 +300,18 @@ async function main() {
     [...new Set(watched.map((r) => String(r.target_name ?? "")))].filter((t) => /^\d+$/.test(t) && !toiStars.has(t) && !hosts.has(t) && !seen.has(t)),
     rnd,
   );
+  // Stars with two or more sectors first; single-sector ones only fill any places left.
   tries = 0;
+  const single: string[] = [];
   for (const t of quiet) {
-    if (picks.length >= TARGETS || tries++ >= MAX_TRIES) break;
-    if (await eligible(t, true)) picks.push({ tic: t, label: `TIC ${t}`, reason: "blind" });
+    if (picks.length >= TARGETS || tries++ >= MAX_TRIES * 1.5) break;
+    const n = await eligible(t, true);
+    if (n >= 2) picks.push({ tic: t, label: `TIC ${t}`, reason: "blind" });
+    else if (n === 1) single.push(t);
+  }
+  for (const t of single) {
+    if (picks.length >= TARGETS) break;
+    picks.push({ tic: t, label: `TIC ${t}`, reason: "blind" });
   }
   console.log(`investigating ${picks.length} stars`);
 
