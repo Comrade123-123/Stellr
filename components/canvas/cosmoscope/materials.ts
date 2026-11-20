@@ -19,10 +19,10 @@ const DEFINES: Partial<Record<BodyName, Record<string, string>>> = {
 };
 
 /** A planet's (or the Sun's, or the textured Moon's) surface. */
-export function planetMaterial(name: BodyName | "Moon", common: Common, maps: { map?: THREE.Texture; night?: THREE.Texture; ring?: THREE.Texture }) {
+export function planetMaterial(name: BodyName | "Moon", common: Common, maps: { map?: THREE.Texture; night?: THREE.Texture; ring?: THREE.Texture }, low = false) {
   const blank = new THREE.Texture();
   return new THREE.ShaderMaterial({
-    defines: name === "Moon" ? {} : (DEFINES[name] ?? {}),
+    defines: name === "Moon" ? {} : { ...(DEFINES[name] ?? {}), ...(low ? { LOW: "" } : {}) },
     uniforms: {
       ...common,
       map: { value: maps.map ?? blank },

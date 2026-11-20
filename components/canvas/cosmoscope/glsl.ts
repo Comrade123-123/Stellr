@@ -158,31 +158,43 @@ export const PLANET_FRAGMENT = /* glsl */ `
     float mu = max(dot(n, v), 0.0);
 
     #ifdef SUN
-      // The Sun as a white-light photograph shows it: a smooth disc, limb-darkened from warm white
-      // at the centre to deep orange at the edge, with faint mottling from convection, bright
-      // faculae near the limb, and a few small dark sunspots in the active belts.
-      float t = uTime;
+      // Boiling plasma: two layers of warped noise (large convection patterns and a fine,
+      // faster boil) mapped through a temperature ramp, deep red in the cool lanes to yellow-white
+      // in the hottest upwellings; limb darkening cools and dims it towards the edge; a few dark
+      // sunspots sit in the active belts.
+      float t = uTime * 0.03;
       vec3 base = texture2D(map, vUv).rgb;
       float px = length(fwidth(p));
-      float nearFade = 1.0 - smoothstep(0.004, 0.02, px);
-      float mottle = fbm(p * 34.0 + vec3(0.0, t * 0.003, 0.0)) * 0.5 + fbm(p * 90.0 + vec3(t * 0.006)) * 0.5 * nearFade;
+      float fineFade = 1.0 - smoothstep(0.02, 0.06, px * 6.0);
+      vec3 q = p * 2.6;
+      #ifdef LOW
+        // Cheaper on weak GPUs: one warp instead of three, and a single noise for the boil.
+        vec3 w = vec3(fbm(q + vec3(0.0, t, 0.0)));
+        float big = fbm(q * 1.8 + w * 1.7);
+        float boil = snoise(p * 26.0 + w * 2.2 + vec3(0.0, t * 3.0, 0.0));
+      #else
+        vec3 w = vec3(fbm(q + vec3(0.0, t, 0.0)), fbm(q + vec3(5.2, 1.3, t)), fbm(q + vec3(t, 2.8, 9.1)));
+        float big = fbm(q * 1.8 + w * 1.7 + vec3(0.0, 0.0, t * 0.6));
+        float boil = fbm(p * 26.0 + w * 2.2 + vec3(0.0, t * 3.0, t * 1.5));
+      #endif
+      float heat = 0.6 + 0.28 * big + 0.14 * boil * fineFade + 0.05 * (dot(base, vec3(0.33)) - 0.5);
+      heat -= (1.0 - mu) * 0.2;
+      // Sunspots: dark cores with a brown, streaked surround.
       float lat = abs(p.y);
       float belt = smoothstep(0.08, 0.16, lat) * smoothstep(0.55, 0.35, lat);
-      vec3 q = p + vec3(0.0, 0.0, t * 0.0015);
-      float act = snoise(q * 2.4) * 0.65 + snoise(q * 5.5) * 0.35;
-      float region = smoothstep(0.35, 0.6, act) * belt;
-      float spotField = snoise(q * 13.0) * 0.6 + snoise(q * 29.0) * 0.4;
-      float penumbra = smoothstep(0.5, 0.58, spotField) * region;
-      float umbra = smoothstep(0.66, 0.74, spotField) * region;
-      float faculae = smoothstep(0.2, 0.6, act) * belt * (1.0 - penumbra) * smoothstep(0.6, 0.1, mu);
-      // Limb darkening, Eddington-style with a second-order term, and redder towards the edge.
-      float limbI = 0.45 + 0.55 * pow(mu, 0.6);
-      vec3 c = mix(vec3(1.05, 0.34, 0.03), vec3(1.2, 0.88, 0.48), smoothstep(0.0, 1.0, pow(mu, 0.5)));
-      c *= limbI * (0.985 + 0.03 * (mottle - 0.5) * 2.0 * nearFade + 0.02 * (dot(base, vec3(0.33)) - 0.5));
-      c *= 1.0 + faculae * 0.18;
-      c = mix(c, c * vec3(0.55, 0.38, 0.25), penumbra * 0.9);
-      c = mix(c, vec3(0.1, 0.04, 0.015), umbra);
-      gl_FragColor = vec4(c, 1.0);
+      vec3 sq = p + vec3(0.0, 0.0, uTime * 0.0015);
+      float region = smoothstep(0.35, 0.6, snoise(sq * 2.4) * 0.65 + snoise(sq * 5.5) * 0.35) * belt;
+      float spotField = snoise(sq * 12.0) * 0.6 + snoise(sq * 26.0) * 0.4;
+      float penumbra = smoothstep(0.48, 0.56, spotField) * region;
+      float umbra = smoothstep(0.64, 0.72, spotField) * region;
+      heat -= penumbra * 0.3 + umbra * 0.5;
+      heat = clamp(heat, 0.0, 1.0);
+      vec3 c = mix(vec3(0.42, 0.05, 0.0), vec3(1.0, 0.32, 0.02), smoothstep(0.0, 0.4, heat));
+      c = mix(c, vec3(1.0, 0.68, 0.16), smoothstep(0.35, 0.7, heat));
+      c = mix(c, vec3(1.0, 0.94, 0.72), smoothstep(0.68, 1.0, heat));
+      c *= 0.66 + 0.34 * pow(mu, 0.45);
+      c = mix(c, vec3(0.08, 0.02, 0.0), umbra * 0.85);
+      gl_FragColor = vec4(c * 1.35, 1.0);
       #include <colorspace_fragment>
       return;
     #endif

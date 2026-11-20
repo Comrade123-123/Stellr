@@ -96,29 +96,42 @@ interface Shared {
 }
 
 /*
- * Around the Sun's disc, on a quad that always faces the camera: a soft glow, as a camera sees
- * the Sun, with the faint corona's uneven streamers far out and a thin warm rim at the limb.
- * `uScale` is the quad's half-width in solar radii, so r below is in solar radii from the centre.
+ * Around the Sun's disc, on a quad that always faces the camera: a hot glow, a ragged edge of
+ * flickering plasma licking off the limb, and the faint corona fading far out. `uScale` is the
+ * quad's half-width in solar radii, so r below is in solar radii from the centre.
  */
 const coronaFragment = /* glsl */ `
   uniform float uTime;
   uniform float uScale;
   varying vec2 vUv;
-  float hash(float n) { return fract(sin(n) * 43758.5453); }
-  float noise1(float x) { float i = floor(x); float f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(hash(i), hash(i + 1.0), f); }
+  float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), f.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+  float fbm2(vec2 p) {
+    float s = 0.0, a = 0.5;
+    for (int i = 0; i < 4; i++) { s += a * vnoise(p); p *= 2.07; a *= 0.5; }
+    return s;
+  }
   void main() {
     vec2 d = (vUv - 0.5) * 2.0 * uScale;
     float r = length(d);
     float a = atan(d.y, d.x);
     float h = max(r - 1.0, 0.0);
-    float outside = smoothstep(0.985, 1.01, r);
-    // Glow: a tight bright halo and a wide faint one.
-    float glow = 1.1 * exp(-h * 7.0) + 0.3 * exp(-h * 1.8) + 0.07 * exp(-h * 0.6);
-    // The corona's streamers: only a gentle unevenness around the disc, never spikes.
-    float streak = noise1(a * 2.0 + uTime * 0.004) * 0.6 + noise1(a * 5.0 + 20.0 - uTime * 0.003) * 0.4;
-    float corona = 0.1 * pow(1.0 + h, -3.0) * (0.6 + 0.8 * streak);
-    vec3 col = vec3(1.0, 0.62, 0.26) * glow + vec3(1.0, 0.88, 0.72) * corona;
-    col += vec3(1.0, 0.45, 0.25) * exp(-pow((r - 1.006) / 0.008, 2.0)) * 0.35;
+    float outside = smoothstep(0.99, 1.005, r);
+    // Angle as a seamless loop for the noise: a circle in noise space.
+    vec2 ring = vec2(cos(a), sin(a));
+    float tt = uTime * 0.06;
+    // Plasma licking off the limb: turbulent, rising, flickering.
+    float flame = fbm2(ring * 9.0 + vec2(0.0, -tt * 2.0 + h * 14.0));
+    float tongues = smoothstep(0.35, 0.95, flame) * exp(-h * (7.0 + 10.0 * (1.0 - flame)));
+    // Glow: a tight hot halo and a wide faint one, gently uneven around the disc.
+    float uneven = 0.75 + 0.5 * fbm2(ring * 2.5 + vec2(tt * 0.2, 3.0));
+    float glow = (1.1 * exp(-h * 6.0) + 0.35 * exp(-h * 1.6) * uneven + 0.08 * exp(-h * 0.5) * uneven);
+    vec3 col = vec3(1.0, 0.55, 0.16) * glow + vec3(1.0, 0.42, 0.08) * tongues * 1.6;
     col *= outside;
     // Fade to nothing well inside the quad, so its square edge never shows.
     col *= 1.0 - smoothstep(uScale * 0.55, uScale * 0.95, r);
@@ -350,6 +363,7 @@ function Planets({
   reducedMotion,
   layers,
   segments,
+  low,
 }: {
   clock: React.RefObject<Clock>;
   shared: React.RefObject<Shared>;
@@ -360,6 +374,8 @@ function Planets({
   reducedMotion: boolean;
   layers: Layers;
   segments: number;
+  /** The low quality tier: cheaper shaders where there's a cheaper version. */
+  low: boolean;
 }) {
   const mapped = BODIES.filter((b) => b.texture);
   const textures = useTexture([...mapped.map((b) => b.texture!), ...PLANET_TEXTURES]);
@@ -373,7 +389,7 @@ function Planets({
     const [ringMap, nightMap, cloudMap] = textures.slice(mapped.length);
     cloudMap.colorSpace = THREE.NoColorSpace;
     const map = (b: (typeof BODIES)[number]) => (b.texture ? textures[mapped.indexOf(b)] : undefined);
-    const materials = BODIES.map((b) => planetMaterial(b.name, common, { map: map(b), night: b.name === "Earth" ? nightMap : undefined, ring: b.name === "Saturn" ? ringMap : undefined }));
+    const materials = BODIES.map((b) => planetMaterial(b.name, common, { map: map(b), night: b.name === "Earth" ? nightMap : undefined, ring: b.name === "Saturn" ? ringMap : undefined }, low));
     // The ring texture runs from the inner edge (1.25 radii) to the outer (2.3); the shader reads it by radius.
     const ring = new THREE.RingGeometry(1.25, 2.3, 256, 1);
     const ringMaterial = new THREE.ShaderMaterial({
@@ -1071,6 +1087,7 @@ export default function CosmoscopeScene({
         reducedMotion={reducedMotion}
         layers={layers}
         segments={Math.min(quality.sphereSegments, 96)}
+        low={quality.tier === "low"}
       />
       {layers.moons && <Moons shared={shared} common={common} titan={tracks.get("Titan") ?? null} trueScale={trueScale} selected={selected} onSelect={onSelect} labels={layers.labels} />}
       {layers.craft &&
