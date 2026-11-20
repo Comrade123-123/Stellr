@@ -96,9 +96,9 @@ interface Shared {
 }
 
 /*
- * Around the Sun's disc, on a quad that always faces the camera: the thin red chromosphere,
- * prominences arching off the limb, and the corona's streamers fading out into space. `uScale`
- * is the quad's half-width in solar radii, so r below is in solar radii from the centre.
+ * Around the Sun's disc, on a quad that always faces the camera: a soft glow, as a camera sees
+ * the Sun, with the faint corona's uneven streamers far out and a thin warm rim at the limb.
+ * `uScale` is the quad's half-width in solar radii, so r below is in solar radii from the centre.
  */
 const coronaFragment = /* glsl */ `
   uniform float uTime;
@@ -110,33 +110,16 @@ const coronaFragment = /* glsl */ `
     vec2 d = (vUv - 0.5) * 2.0 * uScale;
     float r = length(d);
     float a = atan(d.y, d.x);
-    float t = uTime * 0.02;
-    // Streamers: brighter and longer at some angles, slowly changing.
-    float streak = 0.0;
-    streak += noise1(a * 3.0 + t) * 0.6;
-    streak += noise1(a * 7.0 - t * 1.3 + 10.0) * 0.3;
-    streak += noise1(a * 19.0 + t * 0.7 + 30.0) * 0.1;
-    float fall = pow(max(r, 1.0), -2.6 - 1.4 * (1.0 - streak));
-    float corona = fall * (0.55 + 0.9 * streak) * smoothstep(0.98, 1.03, r);
-    vec3 col = mix(vec3(1.0, 0.82, 0.55), vec3(0.85, 0.88, 1.0), smoothstep(1.2, 3.0, r)) * corona;
-    // Chromosphere: a thin pinkish-red rim just above the surface.
-    float chromo = exp(-pow((r - 1.012) / 0.012, 2.0));
-    col += vec3(1.0, 0.28, 0.18) * chromo * 1.3;
-    // Prominences: a few loops and plumes of glowing gas standing off the limb.
-    float prom = 0.0;
-    for (int i = 0; i < 5; i++) {
-      float fi = float(i);
-      float centre = hash(fi * 7.1 + 1.0) * 6.2831853 + t * 0.15 * (hash(fi) - 0.5);
-      float width = 0.05 + 0.08 * hash(fi * 3.3);
-      float height = 0.06 + 0.12 * hash(fi * 5.7) * (0.75 + 0.25 * sin(uTime * 0.05 + fi));
-      float da = abs(mod(a - centre + 3.14159265, 6.2831853) - 3.14159265);
-      float arch = sqrt(max(0.0, 1.0 - pow(da / width, 2.0)));
-      float h = r - 1.0;
-      float shell = exp(-pow((h - height * arch) / (0.012 + 0.02 * arch), 2.0)) * step(0.0, h) * step(da, width);
-      float fil = 0.6 + 0.4 * noise1(r * 90.0 + a * 40.0 + uTime * 0.2);
-      prom += shell * fil * smoothstep(0.0, 0.25, arch);
-    }
-    col += vec3(1.0, 0.35, 0.2) * prom * 1.4;
+    float h = max(r - 1.0, 0.0);
+    float outside = smoothstep(0.985, 1.01, r);
+    // Glow: a tight bright halo and a wide faint one.
+    float glow = 1.1 * exp(-h * 7.0) + 0.3 * exp(-h * 1.8) + 0.07 * exp(-h * 0.6);
+    // The corona's streamers: only a gentle unevenness around the disc, never spikes.
+    float streak = noise1(a * 2.0 + uTime * 0.004) * 0.6 + noise1(a * 5.0 + 20.0 - uTime * 0.003) * 0.4;
+    float corona = 0.1 * pow(1.0 + h, -3.0) * (0.6 + 0.8 * streak);
+    vec3 col = vec3(1.0, 0.62, 0.26) * glow + vec3(1.0, 0.88, 0.72) * corona;
+    col += vec3(1.0, 0.45, 0.25) * exp(-pow((r - 1.006) / 0.008, 2.0)) * 0.35;
+    col *= outside;
     // Fade to nothing well inside the quad, so its square edge never shows.
     col *= 1.0 - smoothstep(uScale * 0.55, uScale * 0.95, r);
     gl_FragColor = vec4(col, 1.0);

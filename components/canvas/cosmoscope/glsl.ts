@@ -158,45 +158,31 @@ export const PLANET_FRAGMENT = /* glsl */ `
     float mu = max(dot(n, v), 0.0);
 
     #ifdef SUN
-      // The photosphere: granules (convection cells) over larger supergranules, sunspot groups in
-      // the active belts either side of the equator, bright faculae around them that show best
-      // near the edge, and limb darkening that turns the disc orange towards its rim.
+      // The Sun as a white-light photograph shows it: a smooth disc, limb-darkened from warm white
+      // at the centre to deep orange at the edge, with faint mottling from convection, bright
+      // faculae near the limb, and a few small dark sunspots in the active belts.
       float t = uTime;
       vec3 base = texture2D(map, vUv).rgb;
-      // Granules fade out where they'd be finer than a pixel, so the disc doesn't shimmer.
-      // Two scales of cells, each fading out where it would be finer than a pixel or two.
       float px = length(fwidth(p));
-      float nearFade = 1.0 - smoothstep(0.15, 0.4, px * 70.0);
-      float farFade = 1.0 - smoothstep(0.15, 0.4, px * 24.0);
-      vec2 g = cellular(p * 70.0 + vec3(0.0, t * 0.02, 0.0));
-      vec2 g2 = cellular(p * 24.0 + vec3(t * 0.006, 0.0, 0.0));
-      float granule = nearFade * smoothstep(0.65, 0.15, g.x) * (0.8 + 0.4 * g.y) + farFade * 0.7 * smoothstep(0.7, 0.2, g2.x) * (0.7 + 0.3 * g2.y);
-      float lanes = nearFade * smoothstep(0.45, 0.85, g.x) + farFade * 0.7 * smoothstep(0.5, 0.9, g2.x);
-      float fine = 1.0;
-      float super = fbm(p * 9.0 + vec3(t * 0.004)) * 0.5 + 0.5;
-      // Active belts, about 5–35° from the equator; groups drift slowly with the rotation.
+      float nearFade = 1.0 - smoothstep(0.004, 0.02, px);
+      float mottle = fbm(p * 34.0 + vec3(0.0, t * 0.003, 0.0)) * 0.5 + fbm(p * 90.0 + vec3(t * 0.006)) * 0.5 * nearFade;
       float lat = abs(p.y);
-      float belt = smoothstep(0.06, 0.14, lat) * smoothstep(0.6, 0.38, lat);
+      float belt = smoothstep(0.08, 0.16, lat) * smoothstep(0.55, 0.35, lat);
       vec3 q = p + vec3(0.0, 0.0, t * 0.0015);
-      float act = snoise(q * 2.2) * 0.6 + snoise(q * 5.0) * 0.4;
-      float region = smoothstep(0.22, 0.5, act) * belt;
-      float spotField = snoise(q * 11.0) * 0.55 + snoise(q * 23.0) * 0.45;
-      float penumbra = smoothstep(0.36, 0.46, spotField) * region;
-      float umbra = smoothstep(0.55, 0.64, spotField) * region;
-      // Penumbral filaments: fine streaks running out from the spot.
-      float fil = 0.75 + 0.25 * sin(snoise(q * 60.0) * 9.0);
-      float faculae = smoothstep(0.15, 0.55, act) * belt * (1.0 - penumbra) * (0.35 + 0.65 * smoothstep(0.7, 0.15, mu));
-      // Limb darkening (I ∝ 1 − 0.6(1 − μ)), redder towards the limb.
-      float limbI = 1.0 - 0.6 * (1.0 - mu) - 0.15 * (1.0 - mu * mu);
-      vec3 hot = vec3(1.0, 0.86, 0.6);
-      vec3 cool = vec3(0.98, 0.52, 0.16);
-      vec3 c = mix(cool, hot, smoothstep(0.0, 0.9, mu));
-      float shade = 1.0 + fine * (0.16 * granule - 0.2 * lanes) + 0.08 * (super - 0.5) + 0.06 * (dot(base, vec3(0.33)) - 0.5);
-      c *= shade * limbI;
-      c *= 1.0 + faculae * 0.35;
-      c = mix(c, c * vec3(0.62, 0.42, 0.28) * fil, penumbra);
-      c = mix(c, vec3(0.13, 0.05, 0.02), umbra);
-      gl_FragColor = vec4(c * 1.02, 1.0);
+      float act = snoise(q * 2.4) * 0.65 + snoise(q * 5.5) * 0.35;
+      float region = smoothstep(0.35, 0.6, act) * belt;
+      float spotField = snoise(q * 13.0) * 0.6 + snoise(q * 29.0) * 0.4;
+      float penumbra = smoothstep(0.5, 0.58, spotField) * region;
+      float umbra = smoothstep(0.66, 0.74, spotField) * region;
+      float faculae = smoothstep(0.2, 0.6, act) * belt * (1.0 - penumbra) * smoothstep(0.6, 0.1, mu);
+      // Limb darkening, Eddington-style with a second-order term, and redder towards the edge.
+      float limbI = 0.45 + 0.55 * pow(mu, 0.6);
+      vec3 c = mix(vec3(1.05, 0.34, 0.03), vec3(1.2, 0.88, 0.48), smoothstep(0.0, 1.0, pow(mu, 0.5)));
+      c *= limbI * (0.985 + 0.03 * (mottle - 0.5) * 2.0 * nearFade + 0.02 * (dot(base, vec3(0.33)) - 0.5));
+      c *= 1.0 + faculae * 0.18;
+      c = mix(c, c * vec3(0.55, 0.38, 0.25), penumbra * 0.9);
+      c = mix(c, vec3(0.1, 0.04, 0.015), umbra);
+      gl_FragColor = vec4(c, 1.0);
       #include <colorspace_fragment>
       return;
     #endif
