@@ -362,15 +362,16 @@ function Swarm({ onStatus }: { onStatus: (s: SwarmStatus) => void }) {
   return <points geometry={geometry} material={material} frustumCulled={false} renderOrder={1} />;
 }
 
-export function MakeRoomForPanel() {
+/** Shifts the view on wide screens so the subject isn't hidden behind the panels; `px` positive moves it left. */
+export function MakeRoomForPanel({ px = 200 }: { px?: number }) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const size = useThree((s) => s.size);
   useEffect(() => {
-    const shift = size.width >= 1024 ? 200 : 0;
+    const shift = size.width >= 1024 ? px : 0;
     if (shift) camera.setViewOffset(size.width, size.height, shift, 0, size.width, size.height);
     else camera.clearViewOffset();
     camera.updateProjectionMatrix();
-  }, [camera, size]);
+  }, [camera, size, px]);
   return null;
 }
 
@@ -405,6 +406,7 @@ export default function OrbitScene({
   onUserMove,
   swarm,
   onSwarmStatus,
+  panelShift = 200,
 }: {
   sats: Satellite[];
   tracked: Satellite | null;
@@ -414,6 +416,8 @@ export default function OrbitScene({
   onUserMove: () => void;
   swarm: boolean;
   onSwarmStatus: (s: SwarmStatus) => void;
+  /** Pixels to shift the view for the panels on wide screens. */
+  panelShift?: number;
 }) {
   const controls = useRef<OrbitControlsImpl | null>(null);
   return (
@@ -432,7 +436,7 @@ export default function OrbitScene({
       {swarm && <Swarm onStatus={onSwarmStatus} />}
       {sats.length > 0 && <Satellites sats={sats} tracked={tracked} />}
       {tracked && <OrbitTrail sat={tracked} name={trackedName} />}
-      <MakeRoomForPanel />
+      <MakeRoomForPanel px={panelShift} />
       <Follow sat={tracked} follow={follow} controls={controls} />
       <OrbitControls
         ref={controls}

@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import type { SwarmStatus } from "@/components/canvas/OrbitScene";
-import ScrambleText from "@/components/ui/ScrambleText";
 import PlacePicker, { usePlace } from "@/components/PlacePicker";
+import { CleanHint, SceneShade, Section, Stat, Status, Toggle, ToolBar, glass, useClean, wide } from "@/components/tools/ToolShell";
 import { compass, parseTLE, passes, stateAt, type Pass, type Satellite, type State } from "@/lib/orbits";
 
 const OrbitScene = dynamic(() => import("@/components/canvas/OrbitScene"), { ssr: false });
@@ -84,7 +83,7 @@ function SatelliteSearch({ onBoard, onPick }: { onBoard: Satellite[]; onPick: (s
         type="search"
         autoComplete="off"
         spellCheck={false}
-        placeholder="FIND A SATELLITE · NAME OR NORAD NO."
+        placeholder="Find a satellite · name or NORAD no."
         value={text}
         onChange={(e) => {
           setText(e.target.value);
@@ -96,12 +95,12 @@ function SatelliteSearch({ onBoard, onPick }: { onBoard: Satellite[]; onPick: (s
           if (e.key === "Enter" && results[0]) pick(results[0]);
           if (e.key === "Escape") setOpen(false);
         }}
-        className="h-10 w-full rounded-full border border-ink/25 bg-void px-4 font-mono text-[11px] tracking-[0.12em] text-ink outline-none placeholder:text-ink/35 focus:border-ink/60"
+        className="h-10 w-full rounded-full border border-ink/15 bg-ink/[0.04] px-4 text-[13px] text-ink outline-none placeholder:text-ink/35 focus:border-ink/50"
       />
       {open && q && (
         <ul
           role="listbox"
-          className="absolute inset-x-0 top-12 z-20 max-h-72 overflow-y-auto border border-ink/15 bg-void/95 backdrop-blur-md"
+          className="cosmo-scroll absolute inset-x-0 top-12 z-20 max-h-72 overflow-y-auto rounded-xl border border-ink/15 bg-[#07080b]/95 p-1 backdrop-blur-xl"
         >
           {results.map((s) => (
             <li key={s.id} role="option" aria-selected={false}>
@@ -109,7 +108,7 @@ function SatelliteSearch({ onBoard, onPick }: { onBoard: Satellite[]; onPick: (s
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pick(s)}
-                className="flex w-full items-baseline justify-between gap-4 px-4 py-2.5 text-left font-mono text-[11px] tracking-[0.1em] text-ink/85 transition-colors hover:bg-ink/5 hover:text-gold"
+                className="flex w-full items-baseline justify-between gap-4 rounded-lg px-3 py-2 text-left text-[13px] text-ink/85 transition-colors hover:bg-ink/[0.07] hover:text-gold"
               >
                 <span className="truncate">{display(s)}</span>
                 <span className="shrink-0 text-[10px] text-ink/40">#{s.id}</span>
@@ -172,6 +171,7 @@ export default function OrbitWatch() {
   const [list, setList] = useState<Pass[]>([]);
   /** Satellites found by search that aren't in the loaded groups; drawn and trackable like the rest. */
   const [extra, setExtra] = useState<Satellite[]>([]);
+  const [clean, setClean] = useClean();
 
   const fetchAll = useCallback(() => {
     setLoad("loading");
@@ -228,188 +228,191 @@ export default function OrbitWatch() {
   const label = TRACKABLE.find((t) => t.id === trackedId)?.label ?? tracked?.name ?? "";
   const noOrbit = tracked && !live;
 
-  return (
-    <main className="relative min-h-svh bg-void text-ink lg:h-svh lg:overflow-hidden">
-      {/* Globe: fills the screen on desktop, the top of it on phones. */}
-      <div className="relative h-[58svh] w-full lg:absolute lg:inset-0 lg:h-full">
-        <OrbitScene
-          sats={all}
-          tracked={tracked}
-          trackedName={label}
-          observer={place}
-          follow={follow}
-          onUserMove={() => setFollow(false)}
-          swarm={swarm}
-          onSwarmStatus={setSwarmStatus}
+  const next = list.find((p) => p.visible && p.end.getTime() > clock);
+  const nowOver = list.find((p) => p.start.getTime() <= clock && p.end.getTime() > clock);
+
+  const status =
+    load === "loading" ? (
+      <Status>LOADING ORBITAL ELEMENTS…</Status>
+    ) : load === "error" ? (
+      <Status tone="red">
+        ORBITAL DATA UNAVAILABLE ·{" "}
+        <button type="button" onClick={fetchAll} className="text-gold hover:underline">
+          RETRY
+        </button>
+      </Status>
+    ) : noOrbit ? (
+      <Status tone="red">NO CURRENT ORBIT · IT MAY HAVE RE-ENTERED</Status>
+    ) : live ? (
+      <Status tone={live.sunlit ? "gold" : "blue"}>{live.sunlit ? "IN SUNLIGHT" : "IN EARTH'S SHADOW"} · {all.length} OBJECTS ON THE GLOBE</Status>
+    ) : null;
+
+  /** What's being followed: its name, where it is, and when it's next overhead. */
+  const summary = (
+    <div className={glass}>
+      <Section>
+        <p className="font-mono text-[9px] tracking-[0.22em] text-ink/45">{custom ? `NORAD #${custom.id}` : "FOLLOWING"}</p>
+        <h2 className="display mt-2 truncate text-[22px] leading-none text-ink">{label}</h2>
+        <div className="mt-3">{status}</div>
+      </Section>
+      <Section>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+          <Stat label="LATITUDE" value={live ? latLabel(live.latitude) : "—"} />
+          <Stat label="LONGITUDE" value={live ? lonLabel(live.longitude) : "—"} />
+          <Stat label="ALTITUDE" value={live ? `${Math.round(live.altitudeKm).toLocaleString("en")} km` : "—"} accent />
+          <Stat label="SPEED" value={live ? `${fixed(live.speedKmS)} km/s` : "—"} sub={live ? `${Math.round(live.speedKmS * 3600).toLocaleString("en")} km/h` : undefined} accent />
+        </div>
+      </Section>
+      {place && load === "ready" && (
+        <Section eyebrow={nowOver ? "OVERHEAD NOW" : "NEXT TIME YOU CAN SEE IT"}>
+          {nowOver ? (
+            <p className="text-[14px] text-gold">Above your horizon now · {Math.round(nowOver.maxElevation)}° at its highest</p>
+          ) : next ? (
+            <>
+              <p className="text-[16px] text-ink">
+                {day(next.start, tz)} · {time(next.start, tz)}
+              </p>
+              <p className="mt-1 text-[12px] text-ink/55">
+                {compass(next.startAzimuth)} → {compass(next.endAzimuth)} · {Math.round(next.maxElevation)}° high · {Math.max(1, Math.round((next.end.getTime() - next.start.getTime()) / 60_000))} min
+              </p>
+            </>
+          ) : (
+            <p className="text-[13px] text-ink/55">No visible pass in the next three days from {place.name}.</p>
+          )}
+        </Section>
+      )}
+    </div>
+  );
+
+  /** Choosing what to follow, the passes, and the visitor's place. */
+  const controls = (
+    <div className={glass}>
+      <Section eyebrow="FOLLOW">
+        <SatelliteSearch onBoard={all} onPick={pick} />
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {(options.length ? options : TRACKABLE.slice(0, 1)).map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => {
+                setTrackedId(o.id);
+                setFollow(true);
+              }}
+              className={`rounded-full border px-3 py-1.5 text-[12px] transition-colors ${o.id === trackedId ? "border-gold bg-gold text-void" : "border-ink/20 text-ink/75 hover:border-ink/50"}`}
+            >
+              {o.label}
+            </button>
+          ))}
+          {custom && <span className="max-w-full truncate rounded-full border border-gold bg-gold px-3 py-1.5 text-[12px] text-void">{display(custom)}</span>}
+        </div>
+      </Section>
+      <Section eyebrow={`NEXT PASSES · ${label.toUpperCase()}`} right={<span className="font-mono text-[9px] tracking-[0.16em] text-ink/35">ABOVE 10°</span>}>
+        {load !== "ready" ? (
+          <p className="text-[13px] text-ink/45">—</p>
+        ) : list.length ? (
+          <ul className="space-y-1.5">
+            {list.slice(0, 6).map((p) => {
+              const overhead = p.start.getTime() <= clock && p.end.getTime() > clock;
+              const on = overhead || p.visible;
+              return (
+                <li key={p.start.getTime()} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 ${on ? "bg-gold/[0.08]" : "bg-ink/[0.03]"}`}>
+                  <div className="w-[86px] shrink-0 whitespace-nowrap">
+                    <p className="font-mono text-[10px] tracking-[0.1em] text-ink/50">{day(p.start, tz).split(" ").slice(0, 1)}</p>
+                    <p className="font-mono text-[14px] tabular-nums text-ink">{time(p.start, tz)}</p>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[12px] text-ink/75">
+                      {compass(p.startAzimuth)} → {compass(p.endAzimuth)} · {Math.max(1, Math.round((p.end.getTime() - p.start.getTime()) / 60_000))} min
+                    </p>
+                    <div className="mt-1.5 h-1 rounded-full bg-ink/10">
+                      <div className={`h-1 rounded-full ${on ? "bg-gold" : "bg-ink/35"}`} style={{ width: `${Math.min(100, (p.maxElevation / 90) * 100)}%` }} />
+                    </div>
+                  </div>
+                  <span className={`w-[84px] shrink-0 whitespace-nowrap text-right font-mono text-[9px] tracking-[0.12em] ${on ? "text-gold" : "text-ink/35"}`}>
+                    {overhead ? "● NOW" : p.visible ? "VISIBLE" : "NOT VISIBLE"}
+                    <span className="block text-ink/40">{Math.round(p.maxElevation)}° HIGH</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="text-[13px] text-ink/55">No passes above 10° in the next three days from here.</p>
+        )}
+        <p className="mt-3 text-[11px] leading-relaxed text-ink/40">Visible: it catches sunlight while your sky is dark, so you can see it with your own eyes. Times are local to the place chosen.</p>
+      </Section>
+      <Section eyebrow="YOUR SKY">
+        <PlacePicker state={placeState} />
+        <p className="mt-2 text-[11px] text-ink/40">Computed in your browser. Your location never leaves this page.</p>
+      </Section>
+      <div className="border-t border-ink/[0.08] p-2">
+        <Toggle
+          label="All active satellites"
+          note={
+            swarmStatus.state === "loading"
+              ? "Loading the full active list…"
+              : swarmStatus.state === "on"
+                ? `${swarmStatus.count.toLocaleString("en")} shown · updated every 4 s`
+                : swarmStatus.state === "error"
+                  ? "Unavailable right now"
+                  : "Thousands of dots · heavier on older devices"
+          }
+          on={swarm}
+          onChange={() => setSwarm((v) => !v)}
         />
       </div>
+    </div>
+  );
 
-      <header className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-5 sm:p-8">
-        <div className="pointer-events-auto">
-          <Link href="/" className="font-mono text-[11px] tracking-[0.2em] text-ink/60 transition-colors hover:text-gold">
-            <ScrambleText text="← STELLR" />
-          </Link>
-          <h1 className="display mt-5 text-[clamp(1.6rem,3vw,2.8rem)] text-ink">Orbit Watch</h1>
-          <p className="caps mt-2 hidden max-w-[34ch] text-[11px] text-ink/55 sm:block sm:text-[12px]">
-            Satellites and space stations where they are right now, and when they cross your sky.
-          </p>
+  return (
+    <main className="relative bg-void text-ink">
+      <section className={`relative w-full overflow-hidden ${clean ? "h-svh" : "h-[64svh] lg:h-svh"} min-h-[480px]`}>
+        <div className="absolute inset-0">
+          <OrbitScene
+            sats={all}
+            tracked={tracked}
+            trackedName={label}
+            observer={place}
+            follow={follow}
+            onUserMove={() => setFollow(false)}
+            swarm={swarm}
+            onSwarmStatus={setSwarmStatus}
+            panelShift={clean ? 0 : 30}
+          />
         </div>
-        <button
-          type="button"
-          onClick={() => setFollow((f) => !f)}
-          className={`pointer-events-auto whitespace-nowrap rounded-full border px-4 py-2 font-mono text-[10px] tracking-[0.2em] transition-colors ${
-            follow ? "border-gold text-gold" : "border-ink/30 text-ink/70 hover:border-ink/60"
-          }`}
-        >
-          {follow ? "● FOLLOWING" : "FOLLOW"}{" "}
-          <span className="hidden max-w-[24ch] truncate align-bottom sm:inline-block">{label.toUpperCase()}</span>
-        </button>
-      </header>
+        <SceneShade clean={clean} />
+        <ToolBar title="Orbit Watch" tagline="Satellites and space stations where they are right now, and when they cross your sky." clean={clean} onClean={() => setClean(!clean)}>
+          <button
+            type="button"
+            onClick={() => setFollow((f) => !f)}
+            className={`flex items-center gap-2 rounded-full border px-3.5 py-2 text-[12px] backdrop-blur-md transition-colors ${follow ? "border-gold/70 bg-black/40 text-gold" : "border-ink/20 bg-black/40 text-ink/80 hover:border-ink/50"}`}
+          >
+            <span className={`block h-1.5 w-1.5 rounded-full ${follow ? "live-dot bg-gold" : "bg-ink/40"}`} />
+            {follow ? "Following" : "Follow"}
+            <span className="hidden max-w-[16ch] truncate sm:inline">{label}</span>
+          </button>
+        </ToolBar>
 
-      <aside className="relative z-10 px-5 pb-10 sm:px-8 lg:absolute lg:bottom-8 lg:right-8 lg:top-28 lg:w-[388px] lg:overflow-y-auto lg:overflow-x-hidden lg:p-[4px]">
-        <div className="frame bg-void/70 backdrop-blur-md">
-          {/* What to follow */}
-          <div className="border-b border-ink/10 p-5">
-            <SatelliteSearch onBoard={all} onPick={pick} />
-            <div className="mt-4 flex flex-wrap gap-2">
-              {(options.length ? options : TRACKABLE.slice(0, 1)).map((o) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  onClick={() => {
-                    setTrackedId(o.id);
-                    setFollow(true);
-                  }}
-                  className={`rounded-full border px-4 py-1.5 font-mono text-[10px] tracking-[0.2em] transition-colors ${
-                    o.id === trackedId ? "border-gold bg-gold text-void" : "border-ink/25 text-ink/70 hover:border-ink/60"
-                  }`}
-                >
-                  {o.label.toUpperCase()}
-                </button>
-              ))}
-              {custom && (
-                <span className="max-w-full truncate rounded-full border border-gold bg-gold px-4 py-1.5 font-mono text-[10px] tracking-[0.2em] text-void">
-                  {display(custom)}
-                </span>
-              )}
-            </div>
-            {custom && (
-              <p className="mt-3 font-mono text-[10px] tracking-[0.15em] text-ink/45">NORAD #{custom.id}</p>
-            )}
-          </div>
-
-          {/* Live state */}
-          <dl className="grid grid-cols-2 border-b border-ink/10 font-mono text-xs">
-            {[
-              ["LATITUDE", live ? latLabel(live.latitude) : "—"],
-              ["LONGITUDE", live ? lonLabel(live.longitude) : "—"],
-              ["ALTITUDE", live ? `${Math.round(live.altitudeKm)} KM` : "—"],
-              ["SPEED", live ? `${fixed(live.speedKmS)} KM/S` : "—"],
-            ].map(([k, v], i) => (
-              <div key={k} className={`p-4 ${i % 2 === 0 ? "border-r" : ""} ${i < 2 ? "border-b" : ""} border-ink/10`}>
-                <dt className="text-[10px] tracking-[0.2em] text-ink/45">{k}</dt>
-                <dd className="mt-1.5 tabular-nums tracking-[0.06em] text-gold">{v}</dd>
-              </div>
-            ))}
-          </dl>
-          <p className="border-b border-ink/10 px-4 py-3 font-mono text-[10px] tracking-[0.2em] text-ink/55">
-            {load === "loading" && "LOADING ORBITAL ELEMENTS…"}
-            {load === "error" && (
-              <>
-                ORBITAL DATA UNAVAILABLE.{" "}
-                <button type="button" onClick={fetchAll} className="text-gold underline-offset-4 hover:underline">
-                  RETRY
-                </button>
-              </>
-            )}
-            {load === "ready" && noOrbit && "NO CURRENT ORBIT · IT MAY HAVE RE-ENTERED"}
-            {load === "ready" && live && (live.sunlit ? "IN SUNLIGHT" : "IN EARTH'S SHADOW")}
-            {load === "ready" && ` · ${all.length} OBJECTS ON THE GLOBE`}
+        <div className={`absolute left-4 top-20 z-10 w-[300px] ${wide(clean)}`}>{summary}</div>
+        <aside className={`cosmo-scroll absolute bottom-4 right-4 top-20 z-10 w-[360px] overflow-y-auto ${wide(clean)}`}>
+          {controls}
+          <p className="mt-3 px-2 font-mono text-[9px] leading-relaxed tracking-[0.14em] text-ink/35">
+            ORBITAL ELEMENTS FROM{" "}
+            <a href="https://celestrak.org" target="_blank" rel="noreferrer" className="text-ink/60 hover:text-gold">
+              CELESTRAK
+            </a>{" "}
+            · POSITIONS BY SGP4, LIVE IN YOUR BROWSER
           </p>
+        </aside>
+        <CleanHint clean={clean} />
+      </section>
 
-          {/* Every active satellite, on request: thousands of dots, so it starts off. */}
-          <div className="flex items-center justify-between gap-4 border-b border-ink/10 px-4 py-3">
-            <div className="font-mono text-[10px] tracking-[0.2em]">
-              <p className="text-ink/70">ALL ACTIVE SATELLITES</p>
-              <p className="mt-1 text-ink/40">
-                {swarmStatus.state === "loading" && "LOADING THE FULL ACTIVE LIST…"}
-                {swarmStatus.state === "on" && `${swarmStatus.count.toLocaleString("en")} SHOWN · UPDATED EVERY 4 S`}
-                {swarmStatus.state === "error" && "UNAVAILABLE RIGHT NOW"}
-                {swarmStatus.state === "off" && "THOUSANDS OF DOTS · HEAVIER ON OLDER DEVICES"}
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={swarm}
-              aria-label="Show all active satellites"
-              onClick={() => setSwarm((v) => !v)}
-              className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${swarm ? "border-gold bg-gold" : "border-ink/30"}`}
-            >
-              <span
-                className={`absolute top-1/2 block h-4 w-4 -translate-y-1/2 rounded-full transition-all ${swarm ? "left-[22px] bg-void" : "left-[3px] bg-ink/70"}`}
-              />
-            </button>
-          </div>
-
-          {/* Where the visitor is */}
-          <div className="border-b border-ink/10 p-5">
-            <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">YOUR SKY</p>
-            <div className="mt-3">
-              <PlacePicker state={placeState} />
-            </div>
-            <p className="caps mt-3 text-[10px] text-ink/45">Computed in your browser. Your location never leaves this page.</p>
-          </div>
-
-          {/* Passes */}
-          <div className="p-5">
-            <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">
-              NEXT PASSES · {label.toUpperCase()} · ABOVE 10°
-            </p>
-            {load !== "ready" ? (
-              <p className="mt-4 font-mono text-xs text-ink/45">—</p>
-            ) : list.length ? (
-              <ul className="mt-3 divide-y divide-ink/10">
-                {list.slice(0, 6).map((p) => {
-                  const overhead = p.start.getTime() <= clock && p.end.getTime() > clock;
-                  return (
-                    <li key={p.start.getTime()} className="flex items-start justify-between gap-4 py-3 font-mono text-xs">
-                      <div>
-                        <p className="tracking-[0.08em] text-ink">
-                          {day(p.start, tz)} · {time(p.start, tz)}
-                        </p>
-                        <p className="mt-1 text-[10px] tracking-[0.14em] text-ink/50">
-                          {compass(p.startAzimuth)} → {compass(p.endAzimuth)} · {Math.round(p.maxElevation)}° HIGH ·{" "}
-                          {Math.max(1, Math.round((p.end.getTime() - p.start.getTime()) / 60_000))} MIN
-                        </p>
-                      </div>
-                      <span
-                        className={`shrink-0 text-[10px] tracking-[0.18em] ${overhead || p.visible ? "text-gold" : "text-ink/35"}`}
-                      >
-                        {overhead ? "● NOW" : p.visible ? "VISIBLE" : "NOT VISIBLE"}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="caps mt-4 text-[11px] text-ink/55">No passes above 10° in the next three days from here.</p>
-            )}
-            <p className="caps mt-4 text-[10px] leading-relaxed text-ink/40">
-              Visible means it catches sunlight while your sky is dark, so you can see it with your own eyes. Times are
-              local to the place chosen.
-            </p>
-          </div>
-        </div>
-
-        <p className="mt-4 font-mono text-[10px] tracking-[0.15em] text-ink/40">
-          ORBITAL ELEMENTS FROM{" "}
-          <a href="https://celestrak.org" target="_blank" rel="noreferrer" className="text-ink/70 hover:text-gold">
-            CELESTRAK
-          </a>{" "}
-          · POSITIONS BY SGP4, LIVE IN YOUR BROWSER
-        </p>
-      </aside>
+      {/* Phones and tablets: the panels under the globe. */}
+      <div className={`space-y-4 px-4 pb-10 pt-4 lg:hidden ${clean ? "hidden" : ""}`}>
+        {summary}
+        {controls}
+        <p className="px-2 font-mono text-[9px] tracking-[0.14em] text-ink/35">ORBITAL ELEMENTS FROM CELESTRAK · POSITIONS BY SGP4, LIVE IN YOUR BROWSER</p>
+      </div>
     </main>
   );
 }

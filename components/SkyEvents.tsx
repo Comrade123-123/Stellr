@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import type { Launch } from "@/app/api/launches/route";
 import PlacePicker, { usePlace } from "@/components/PlacePicker";
-import ScrambleText from "@/components/ui/ScrambleText";
+import { ToolBar, glass } from "@/components/tools/ToolShell";
 import { compass, parseTLE, passes } from "@/lib/orbits";
 import type { Place } from "@/lib/places";
 import { computeEvents, type EventKind, type SkyEvent } from "@/lib/skyEvents";
@@ -120,52 +119,90 @@ function downloadIcs(e: Shown) {
   URL.revokeObjectURL(url);
 }
 
+/** Each kind's colour, for the dot, the card's edge and the filter chip. */
+const KIND_COLOR: Record<EventKind, string> = {
+  eclipse: "#ff8a5c",
+  meteors: "#7fd4ff",
+  planets: "#c9a46a",
+  moon: "#dfe3ea",
+  iss: "#8fe3b0",
+  launch: "#ff6a3d",
+  season: "#b9a2ff",
+};
+
 function Badge({ e }: { e: Shown }) {
   if (e.kind === "launch") {
     const go = e.status?.toUpperCase() === "GO";
-    return <span className={`font-mono text-[10px] tracking-[0.18em] ${go ? "text-gold" : "text-ink/45"}`}>{go ? "● GO" : e.status?.toUpperCase()}</span>;
+    return (
+      <span className={`whitespace-nowrap rounded-full px-2.5 py-1 font-mono text-[9px] tracking-[0.16em] ${go ? "bg-gold/15 text-gold" : "bg-ink/[0.06] text-ink/50"}`}>
+        {go ? "● GO" : e.status?.toUpperCase()}
+      </span>
+    );
   }
   if (e.visible === null) return null;
   return (
-    <span className={`font-mono text-[10px] tracking-[0.18em] ${e.visible ? "text-gold" : "text-ink/35"}`}>
+    <span className={`whitespace-nowrap rounded-full px-2.5 py-1 font-mono text-[9px] tracking-[0.16em] ${e.visible ? "bg-gold/15 text-gold" : "bg-ink/[0.05] text-ink/40"}`}>
       {e.visible ? "VISIBLE FROM HERE" : "NOT FROM HERE"}
     </span>
   );
 }
 
-function EventRow({ e, timeZone }: { e: Shown; timeZone?: string }) {
+/** "In 3 days", "in 5 h", "now". */
+function until(at: Date, now: number) {
+  const ms = at.getTime() - now;
+  if (ms <= 0) return "now";
+  const h = ms / 3_600_000;
+  if (h < 1) return `in ${Math.max(1, Math.round(ms / 60_000))} min`;
+  if (h < 36) return `in ${Math.round(h)} h`;
+  return `in ${Math.round(h / 24)} days`;
+}
+
+function Actions({ e }: { e: Shown }) {
   const roughDate = e.kind === "launch" && e.timeKnown === false;
-  const dayOnly = e.kind === "meteors";
   return (
-    <li className="grid grid-cols-[3.5rem_1fr] gap-x-5 border-b border-ink/10 py-5 sm:grid-cols-[4.5rem_1fr]">
-      <div className="text-right">
-        <p className="display text-2xl leading-none text-ink sm:text-3xl">{fmt(e.at, { day: "2-digit" }, timeZone)}</p>
-        <p className="mt-1.5 font-mono text-[10px] tracking-[0.18em] text-ink/50">{fmt(e.at, { weekday: "short" }, timeZone)}</p>
+    <div className="mt-4 flex flex-wrap gap-2">
+      {!roughDate && (
+        <button type="button" onClick={() => downloadIcs(e)} className="rounded-full border border-ink/15 px-3 py-1.5 text-[12px] text-ink/70 transition-colors hover:border-gold/60 hover:text-gold">
+          + Add to calendar
+        </button>
+      )}
+      {e.url && (
+        <a href={e.url} target="_blank" rel="noreferrer" className="rounded-full border border-ink/15 px-3 py-1.5 text-[12px] text-ink/70 transition-colors hover:border-gold/60 hover:text-gold">
+          Watch live ↗
+        </a>
+      )}
+    </div>
+  );
+}
+
+function when(e: Shown, timeZone?: string) {
+  const roughDate = e.kind === "launch" && e.timeKnown === false;
+  return roughDate ? "time TBD" : e.kind === "meteors" ? "night of the peak" : fmt(e.at, { hour: "2-digit", minute: "2-digit", hour12: false }, timeZone);
+}
+
+/** One event on the timeline: a date block, then the card. */
+function EventRow({ e, timeZone }: { e: Shown; timeZone?: string }) {
+  const color = KIND_COLOR[e.kind];
+  return (
+    <li className="grid grid-cols-[3.2rem_1fr] gap-x-4 py-2 sm:grid-cols-[4.5rem_1fr] sm:gap-x-6">
+      <div className="pt-4 text-right">
+        <p className="display text-[26px] leading-none text-ink sm:text-[30px]">{fmt(e.at, { day: "2-digit" }, timeZone)}</p>
+        <p className="mt-1.5 font-mono text-[9px] tracking-[0.18em] text-ink/45">{fmt(e.at, { weekday: "short" }, timeZone)}</p>
       </div>
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">
-            {KIND_LABEL[e.kind]} ·{" "}
-            {roughDate ? "TIME TBD" : dayOnly ? "NIGHT OF THE PEAK" : fmt(e.at, { hour: "2-digit", minute: "2-digit", hour12: false }, timeZone)}
+      <article className="relative overflow-hidden rounded-2xl border border-ink/[0.08] bg-ink/[0.025] p-5 transition-colors hover:border-ink/20">
+        <span aria-hidden className="absolute inset-y-0 left-0 w-[3px]" style={{ background: color }} />
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <p className="flex items-center gap-2 font-mono text-[9px] tracking-[0.2em] text-ink/50">
+            <span className="block h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+            {KIND_LABEL[e.kind]} · {when(e, timeZone).toUpperCase()}
           </p>
           <Badge e={e} />
         </div>
-        <h3 className="display mt-2 text-lg text-ink sm:text-xl">{e.title}</h3>
+        <h3 className="mt-2.5 text-[18px] leading-snug text-ink sm:text-[20px]">{e.title}</h3>
         <p className="mt-2 text-[14px] leading-relaxed text-ink/65">{e.detail}</p>
-        {e.howTo && <p className="mt-2 font-mono text-[11px] leading-relaxed tracking-[0.04em] text-ink/50">{e.howTo}</p>}
-        <div className="mt-3 flex flex-wrap gap-4 font-mono text-[10px] tracking-[0.18em]">
-          {!roughDate && (
-            <button type="button" onClick={() => downloadIcs(e)} className="text-ink/60 transition-colors hover:text-gold">
-              + ADD TO CALENDAR
-            </button>
-          )}
-          {e.url && (
-            <a href={e.url} target="_blank" rel="noreferrer" className="text-ink/60 transition-colors hover:text-gold">
-              WATCH LIVE ↗
-            </a>
-          )}
-        </div>
-      </div>
+        {e.howTo && <p className="mt-2 text-[13px] leading-relaxed text-ink/45">{e.howTo}</p>}
+        <Actions e={e} />
+      </article>
     </li>
   );
 }
@@ -176,7 +213,6 @@ export default function SkyEvents() {
   const { place } = placeState;
   const [filter, setFilter] = useState<EventKind | "all">("all");
   const [onlyVisible, setOnlyVisible] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchBox = useRef<HTMLInputElement>(null);
   const [computed, setComputed] = useState<SkyEvent[] | null>(null);
@@ -231,10 +267,7 @@ export default function SkyEvents() {
   const shown = all.filter(
     (e) => (filter === "all" || e.kind === filter) && (!onlyVisible || e.visible !== false) && matches(e, words, place?.timeZone),
   );
-  const closeSearch = () => {
-    setQuery("");
-    setSearchOpen(false);
-  };
+  const closeSearch = () => setQuery("");
   const week = shown.filter((e) => e.at.getTime() < now + 7 * DAY);
   const later = shown.filter((e) => e.at.getTime() >= now + 7 * DAY);
   const tz = place?.timeZone;
@@ -254,129 +287,167 @@ export default function SkyEvents() {
         ? "COMPUTING ISS PASSES…"
         : null;
 
-  return (
-    <main className="relative min-h-svh bg-void px-5 pb-24 pt-8 text-ink sm:px-8 lg:px-16">
-      <div className="mx-auto max-w-[1100px]">
-        <Link href="/" className="font-mono text-[11px] tracking-[0.2em] text-ink/60 transition-colors hover:text-gold">
-          <ScrambleText text="← STELLR" />
-        </Link>
+  const next = all.find((e) => e.visible && e.at.getTime() > now);
+  const counts = new Map<EventKind | "all", number>([["all", all.length]]);
+  for (const e of all) counts.set(e.kind, (counts.get(e.kind) ?? 0) + 1);
 
-        <div className="mt-10 grid gap-10 lg:grid-cols-[1fr_360px] lg:items-end">
+  return (
+    <main className="relative min-h-svh overflow-x-clip bg-void text-ink">
+      {/* Backdrop: stars over a faint horizon glow. */}
+      <div aria-hidden className="starfield pointer-events-none absolute inset-x-0 top-0 h-[720px] opacity-60" />
+      <div aria-hidden className="pointer-events-none absolute left-1/2 top-[560px] h-[1400px] w-[1800px] -translate-x-1/2 rounded-full bg-void shadow-[0_-2px_0_rgb(201_164_106/0.35),0_-40px_140px_rgb(201_164_106/0.16)]" />
+
+      <div className="relative">
+        <ToolBar title="Sky Events" tagline="A year of the sky, in your time zone, marked by what you can see from where you stand." />
+      </div>
+
+      <div className="relative mx-auto max-w-[1180px] px-5 pt-28 sm:px-8">
+        <div className="grid gap-8 lg:grid-cols-[1fr_380px] lg:items-end">
           <div>
-            <h1 className="display text-[clamp(2rem,4.4vw,4rem)] text-ink">Sky Events</h1>
-            <p className="caps mt-4 max-w-[46ch] text-[12px] text-ink/60 sm:text-[13px]">
-              Eclipses, meteor showers, planets, the Moon, the ISS and rocket launches: a year of the sky, in your time zone,
-              marked by what you can see from where you stand.
+            <p className="font-mono text-[10px] tracking-[0.24em] text-ink/50">THE NEXT YEAR · {place ? place.name.toUpperCase() : "YOUR SKY"}</p>
+            <h2 className="display mt-4 max-w-[16ch] text-[clamp(2.2rem,5vw,4.4rem)] leading-[1.02] text-ink">What&apos;s up in your sky.</h2>
+            <p className="mt-5 max-w-[56ch] text-[15px] leading-relaxed text-ink/60">
+              Eclipses, meteor showers, planets, the Moon, bright ISS passes and rocket launches, timed for where you are.
             </p>
           </div>
-          <div className="frame bg-void/70 p-5">
-            <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">YOUR SKY</p>
-            <div className="mt-3">
+          <div className={`${glass} p-5`}>
+            <p className="font-mono text-[9px] tracking-[0.22em] text-gold">NEXT UP YOU CAN SEE</p>
+            {next ? (
+              <>
+                <p className="mt-3 text-[20px] leading-snug text-ink">{next.title}</p>
+                <p className="mt-1.5 text-[13px] text-ink/55">
+                  {fmt(next.at, { weekday: "short", day: "2-digit", month: "short" }, tz)} · {when(next, tz)} · <span className="text-gold">{until(next.at, now)}</span>
+                </p>
+              </>
+            ) : (
+              <p className="mt-3 text-[13px] text-ink/50">{computed ? "Nothing visible coming up." : "Calculating…"}</p>
+            )}
+            <div className="mt-5 border-t border-ink/[0.08] pt-4">
+              <p className="mb-2.5 font-mono text-[9px] tracking-[0.22em] text-ink/45">YOUR SKY</p>
               <PlacePicker state={placeState} />
+              <p className="mt-2 text-[11px] text-ink/40">Computed in your browser. Your location never leaves this page.</p>
             </div>
-            <p className="caps mt-3 text-[10px] text-ink/45">Computed in your browser. Your location never leaves this page.</p>
           </div>
         </div>
+      </div>
 
-        <div className="mt-12 flex flex-wrap items-center gap-2 border-b border-ink/10 pb-6">
-          {FILTERS.map((f) => (
-            <button
-              key={f.kind}
-              type="button"
-              onClick={() => setFilter(f.kind)}
-              className={`rounded-full border px-4 py-1.5 font-mono text-[10px] tracking-[0.2em] transition-colors ${
-                filter === f.kind ? "border-gold bg-gold text-void" : "border-ink/25 text-ink/70 hover:border-ink/60"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-          <button
-            type="button"
-            aria-expanded={searchOpen}
-            aria-controls="event-search"
-            onClick={() => {
-              if (searchOpen) closeSearch();
-              else {
-                setSearchOpen(true);
-                setTimeout(() => searchBox.current?.focus(), 0);
-              }
-            }}
-            className={`flex items-center gap-2 rounded-full border px-4 py-1.5 font-mono text-[10px] tracking-[0.2em] transition-colors ${
-              searchOpen ? "border-gold text-gold" : "border-ink/25 text-ink/70 hover:border-ink/60"
-            }`}
-          >
-            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden>
-              <circle cx="5" cy="5" r="4" stroke="currentColor" strokeWidth="1.3" />
-              <path d="M8 8l3 3" stroke="currentColor" strokeWidth="1.3" />
-            </svg>
-            SEARCH
-          </button>
-          <label className="ml-auto flex cursor-pointer items-center gap-3 font-mono text-[10px] tracking-[0.18em] text-ink/60">
-            <input
-              type="checkbox"
-              checked={onlyVisible}
-              onChange={(e) => setOnlyVisible(e.target.checked)}
-              className="h-4 w-4 accent-[#c9a46a]"
-            />
-            ONLY WHAT I CAN SEE
-          </label>
-          {searchOpen && (
-            <div id="event-search" className="mt-3 flex w-full items-center gap-4">
-              <div className="relative flex-1">
-                <label htmlFor="event-search-input" className="sr-only">
-                  Search events
-                </label>
-                <input
-                  ref={searchBox}
-                  id="event-search-input"
-                  type="search"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Escape" && closeSearch()}
-                  placeholder="PERSEIDS, MARS, ECLIPSE, ISRO, FALCON, DECEMBER…"
-                  className="h-10 w-full rounded-full border border-ink/25 bg-void px-5 font-mono text-[11px] tracking-[0.12em] text-ink outline-none placeholder:text-ink/35 focus:border-ink/60"
-                />
-              </div>
-              {words.length > 0 && (
-                <span className="shrink-0 font-mono text-[10px] tracking-[0.18em] text-ink/50" aria-live="polite">
-                  {shown.length} {shown.length === 1 ? "MATCH" : "MATCHES"}
-                </span>
-              )}
+      {/* Filters, kept in reach while scrolling. */}
+      <div className="sticky top-0 z-20 mt-12 border-y border-ink/[0.08] bg-[#050608]/85 backdrop-blur-xl">
+        <div className="mx-auto max-w-[1180px] px-5 py-3 sm:px-8">
+          <div className="cosmo-scroll flex items-center gap-1.5 overflow-x-auto">
+            {FILTERS.map((f) => {
+              const on = filter === f.kind;
+              const color = f.kind === "all" ? "#eceef2" : KIND_COLOR[f.kind];
+              return (
+                <button
+                  key={f.kind}
+                  type="button"
+                  onClick={() => setFilter(f.kind)}
+                  className={`flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] transition-colors ${on ? "border-ink bg-ink text-void" : "border-ink/15 text-ink/75 hover:border-ink/45"}`}
+                >
+                  {f.kind !== "all" && <span className="block h-1.5 w-1.5 rounded-full" style={{ background: color }} />}
+                  {f.kind === "iss" ? "ISS" : f.label.charAt(0) + f.label.slice(1).toLowerCase()}
+                  <span className={`font-mono text-[10px] ${on ? "text-void/60" : "text-ink/35"}`}>{counts.get(f.kind) ?? 0}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-2.5 flex flex-wrap items-center gap-3">
+            <div className="relative min-w-[220px] flex-1">
+              <label htmlFor="event-search-input" className="sr-only">
+                Search events
+              </label>
+              <svg className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink/40" width="13" height="13" viewBox="0 0 12 12" fill="none" aria-hidden>
+                <circle cx="5" cy="5" r="4" stroke="currentColor" strokeWidth="1.3" />
+                <path d="M8 8l3 3" stroke="currentColor" strokeWidth="1.3" />
+              </svg>
+              <input
+                ref={searchBox}
+                id="event-search-input"
+                type="search"
+                autoComplete="off"
+                spellCheck={false}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Escape" && closeSearch()}
+                placeholder="Search: Perseids, Mars, eclipse, ISRO, Falcon, December…"
+                className="h-9 w-full rounded-full border border-ink/15 bg-ink/[0.04] pl-9 pr-4 text-[13px] text-ink outline-none placeholder:text-ink/35 focus:border-ink/50"
+              />
             </div>
-          )}
+            {words.length > 0 && (
+              <span className="font-mono text-[10px] tracking-[0.16em] text-ink/50" aria-live="polite">
+                {shown.length} {shown.length === 1 ? "MATCH" : "MATCHES"}
+              </span>
+            )}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={onlyVisible}
+              onClick={() => setOnlyVisible(!onlyVisible)}
+              className="flex items-center gap-2.5 text-[12px] text-ink/70"
+            >
+              <span className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${onlyVisible ? "bg-gold" : "bg-ink/20"}`}>
+                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-void transition-[left] ${onlyVisible ? "left-[18px]" : "left-0.5"}`} />
+              </span>
+              Only what I can see
+            </button>
+          </div>
         </div>
+      </div>
 
+      <div className="relative mx-auto max-w-[1180px] px-5 pb-24 sm:px-8">
         {!computed ? (
-          <p className="py-10 font-mono text-xs tracking-[0.15em] text-ink/45">CALCULATING THE NEXT YEAR OF SKY…</p>
+          <p className="py-12 font-mono text-[11px] tracking-[0.16em] text-ink/45">CALCULATING THE NEXT YEAR OF SKY…</p>
         ) : (
           <>
-            <section className="mt-10">
-              <h2 className="font-mono text-[11px] tracking-[0.22em] text-gold">● THIS WEEK</h2>
+            <section className="pt-10">
+              <h2 className="flex items-center gap-2 font-mono text-[11px] tracking-[0.22em] text-gold">
+                <span className="live-dot block h-1.5 w-1.5 rounded-full bg-gold" /> THIS WEEK
+              </h2>
               {week.length ? (
-                <ul>
+                <ul className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {week.map((e) => (
-                    <EventRow key={e.id} e={e} timeZone={tz} />
+                    <li key={e.id} className="relative flex flex-col overflow-hidden rounded-2xl border border-ink/[0.1] bg-[#07080b]/80 p-5 backdrop-blur-md">
+                      <span aria-hidden className="absolute inset-x-0 top-0 h-[3px]" style={{ background: KIND_COLOR[e.kind] }} />
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="display text-[34px] leading-none text-ink">{fmt(e.at, { day: "2-digit" }, tz)}</p>
+                          <p className="mt-1 font-mono text-[9px] tracking-[0.18em] text-ink/45">
+                            {fmt(e.at, { weekday: "short", month: "short" }, tz)} · {when(e, tz).toUpperCase()}
+                          </p>
+                        </div>
+                        <span className="font-mono text-[10px] text-gold">{until(e.at, now)}</span>
+                      </div>
+                      <p className="mt-4 flex items-center gap-2 font-mono text-[9px] tracking-[0.2em] text-ink/50">
+                        <span className="block h-1.5 w-1.5 rounded-full" style={{ background: KIND_COLOR[e.kind] }} />
+                        {KIND_LABEL[e.kind]}
+                      </p>
+                      <h3 className="mt-1.5 text-[18px] leading-snug text-ink">{e.title}</h3>
+                      <p className="mt-2 flex-1 text-[13px] leading-relaxed text-ink/60">{e.detail}</p>
+                      {e.howTo && <p className="mt-2 text-[12px] leading-relaxed text-ink/45">{e.howTo}</p>}
+                      <div className="mt-3">
+                        <Badge e={e} />
+                      </div>
+                      <Actions e={e} />
+                    </li>
                   ))}
                 </ul>
               ) : (
-                <p className="caps py-6 text-[12px] text-ink/50">
-                  {words.length ? "No matches in the next seven days." : "Nothing of this kind in the next seven days."}
-                </p>
+                <p className="py-6 text-[13px] text-ink/50">{words.length ? "No matches in the next seven days." : "Nothing of this kind in the next seven days."}</p>
               )}
             </section>
 
             {words.length > 0 && shown.length === 0 && (
-              <p className="caps mt-10 text-[12px] text-ink/50">
-                Nothing in the next year matches “{query.trim()}”. Try a shower, a planet, a rocket or a month.
-              </p>
+              <p className="mt-10 text-[13px] text-ink/50">Nothing in the next year matches “{query.trim()}”. Try a shower, a planet, a rocket or a month.</p>
             )}
             {[...months].map(([month, events]) => (
               <section key={month} className="mt-14">
-                <h2 className="font-mono text-[11px] tracking-[0.22em] text-ink/50">{month}</h2>
-                <ul>
+                <h2 className="flex items-baseline gap-3 border-b border-ink/[0.08] pb-3">
+                  <span className="display text-[22px] text-ink">{month.split(" ")[0].charAt(0) + month.split(" ")[0].slice(1).toLowerCase()}</span>
+                  <span className="font-mono text-[11px] tracking-[0.2em] text-ink/40">{month.split(" ")[1]}</span>
+                  <span className="ml-auto font-mono text-[10px] tracking-[0.16em] text-ink/35">{events.length} EVENTS</span>
+                </h2>
+                <ul className="mt-2">
                   {events.map((e) => (
                     <EventRow key={e.id} e={e} timeZone={tz} />
                   ))}
@@ -387,7 +458,7 @@ export default function SkyEvents() {
         )}
 
         {note && <p className="mt-8 font-mono text-[10px] tracking-[0.18em] text-ink/45">{note}</p>}
-        <div className="mt-14 space-y-2 font-mono text-[10px] tracking-[0.15em] text-ink/40">
+        <div className="mt-16 space-y-2 border-t border-ink/[0.08] pt-6 font-mono text-[9px] leading-relaxed tracking-[0.14em] text-ink/35">
           {launches.load === "error" && (
             <p>
               LAUNCH SCHEDULE UNAVAILABLE RIGHT NOW.{" "}
@@ -399,11 +470,11 @@ export default function SkyEvents() {
           {iss.load === "error" && <p>ISS PASSES UNAVAILABLE RIGHT NOW.</p>}
           <p>
             ECLIPSES, MOON AND PLANETS COMPUTED IN YOUR BROWSER · METEOR PEAKS FROM THE IMO CALENDAR · LAUNCHES FROM{" "}
-            <a href="https://thespacedevs.com" target="_blank" rel="noreferrer" className="text-ink/70 hover:text-gold">
+            <a href="https://thespacedevs.com" target="_blank" rel="noreferrer" className="text-ink/60 hover:text-gold">
               THE SPACE DEVS
             </a>{" "}
             · ISS FROM{" "}
-            <a href="https://celestrak.org" target="_blank" rel="noreferrer" className="text-ink/70 hover:text-gold">
+            <a href="https://celestrak.org" target="_blank" rel="noreferrer" className="text-ink/60 hover:text-gold">
               CELESTRAK
             </a>
           </p>

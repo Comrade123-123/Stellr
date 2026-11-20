@@ -7,6 +7,7 @@ import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { earthRotation, observerOnGlobe, sunDirection, type Observer } from "@/lib/orbits";
 import { getQuality } from "@/lib/quality";
+import { planetMaterial } from "./cosmoscope/materials";
 import {
   airFragment,
   airVertex,
@@ -53,51 +54,6 @@ function magnetopause({ speed, density, bz }: Drivers) {
   return { r0, alpha };
 }
 
-const sunVertex = /* glsl */ `
-  varying vec3 vNormal;
-  varying vec3 vPos;
-  varying vec3 vView;
-  void main() {
-    vNormal = normalize(mat3(modelMatrix) * normal);
-    vPos = position;
-    vec4 w = modelMatrix * vec4(position, 1.0);
-    vView = normalize(cameraPosition - w.xyz);
-    gl_Position = projectionMatrix * viewMatrix * w;
-  }
-`;
-
-/* Boiling granulation and sunspot-dark lanes, limb-darkened; a flare brightens and whitens it. */
-const sunFragment = /* glsl */ `
-  uniform float uTime;
-  uniform float uFlare;
-  varying vec3 vNormal;
-  varying vec3 vPos;
-  varying vec3 vView;
-  float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-  float noise(vec3 x) {
-    vec3 i = floor(x), f = fract(x);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
-               mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
-  }
-  float fbm(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * noise(p); p *= 2.1; a *= 0.5; } return s; }
-  void main() {
-    vec3 p = normalize(vPos);
-    float t = uTime * 0.04;
-    float cells = fbm(p * 7.0 + vec3(t, -t, t * 0.5));
-    float fine = fbm(p * 26.0 - vec3(t * 2.0));
-    float spots = smoothstep(0.55, 0.8, fbm(p * 2.2 + vec3(0.0, t * 0.3, 0.0)));
-    float mu = clamp(dot(normalize(vNormal), vView), 0.0, 1.0);
-    float limb = 0.35 + 0.65 * pow(mu, 0.55);
-    vec3 base = mix(vec3(1.0, 0.42, 0.08), vec3(1.0, 0.82, 0.45), cells * 0.8 + fine * 0.35);
-    base *= 1.0 - spots * 0.35 * (1.0 - fine);
-    base += vec3(1.0, 0.9, 0.7) * spots * fine * uFlare * 1.5;
-    vec3 col = base * limb * (1.1 + uFlare * 0.6);
-    gl_FragColor = vec4(col, 1.0);
-    #include <colorspace_fragment>
-  }
-`;
-
 const glowVertex = /* glsl */ `
   varying vec2 vUv;
   void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
@@ -111,7 +67,7 @@ const glowFragment = /* glsl */ `
     vec2 c = vUv - 0.5;
     float r = length(c) * 2.0;
     float a = atan(c.y, c.x);
-    float streak = 0.6 + 0.4 * sin(a * 9.0 + sin(a * 3.0 + uTime * 0.1) * 2.0);
+    float streak = 0.8 + 0.2 * sin(a * 3.0 + sin(a * 2.0 + uTime * 0.05) * 2.0);
     float glow = exp(-max(r - 0.3, 0.0) * mix(7.0, 4.0, uFlare)) * (0.5 + 0.5 * streak);
     glow *= 1.0 - smoothstep(0.85, 1.0, r);
     vec3 col = mix(vec3(1.0, 0.55, 0.2), vec3(1.0, 0.9, 0.75), uFlare) * glow * (0.6 + uFlare * 0.9);
@@ -244,13 +200,12 @@ const auroraFragment = /* glsl */ `
 
 function Sun({ flare, reducedMotion }: { flare: number; reducedMotion: boolean }) {
   const glow = useRef<THREE.Mesh>(null);
+  const [map] = useTexture(["/textures/2k_sun.jpg"]);
+  // The same boiling-plasma Sun as Cosmoscope (cheaper on the low tier).
+  const common = useMemo(() => ({ uTime: { value: 0 }, uFill: { value: 0 } }), []);
   const materials = useMemo(
     () => ({
-      sun: new THREE.ShaderMaterial({
-        vertexShader: sunVertex,
-        fragmentShader: sunFragment,
-        uniforms: { uTime: { value: 0 }, uFlare: { value: 0 } },
-      }),
+      sun: planetMaterial("Sun", common, { map }, getQuality().tier === "low"),
       glow: new THREE.ShaderMaterial({
         vertexShader: glowVertex,
         fragmentShader: glowFragment,
@@ -260,14 +215,14 @@ function Sun({ flare, reducedMotion }: { flare: number; reducedMotion: boolean }
         blending: THREE.AdditiveBlending,
       }),
     }),
-    [],
+    [common, map],
   );
   useFrame(({ clock, camera }) => {
     const t = reducedMotion ? 0 : clock.elapsedTime;
-    materials.sun.uniforms.uTime.value = t;
+    common.uTime.value = t;
     materials.glow.uniforms.uTime.value = t;
     // Ease towards the flare level so a new reading swells in rather than jumps.
-    for (const m of [materials.sun, materials.glow]) m.uniforms.uFlare.value += (flare - m.uniforms.uFlare.value) * 0.03;
+    materials.glow.uniforms.uFlare.value += (flare - materials.glow.uniforms.uFlare.value) * 0.03;
     glow.current?.quaternion.copy(camera.quaternion);
   });
   return (

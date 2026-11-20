@@ -2,12 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import * as THREE from "three";
 import type { SpaceWeather as Data } from "@/app/api/space-weather/route";
 import type { Drivers, View } from "@/components/canvas/SpaceWeatherScene";
 import PlacePicker, { usePlace } from "@/components/PlacePicker";
-import ScrambleText from "@/components/ui/ScrambleText";
+import { CleanHint, SceneShade, Section, Segmented, Stat, Status, ToolBar, glass, useClean, wide } from "@/components/tools/ToolShell";
 
 const Scene = dynamic(() => import("@/components/canvas/SpaceWeatherScene"), { ssr: false });
 
@@ -67,16 +66,6 @@ function fmtTime(iso: string | null | undefined, timeZone?: string) {
   return new Intl.DateTimeFormat("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit", timeZone }).format(new Date(iso)).toUpperCase();
 }
 
-function Stat({ label, value, note, hot }: { label: string; value: string; note?: string; hot?: boolean }) {
-  return (
-    <div className="p-4">
-      <dt className="font-mono text-[10px] tracking-[0.2em] text-ink/45">{label}</dt>
-      <dd className={`mt-1.5 font-mono text-sm tabular-nums tracking-[0.06em] ${hot ? "text-gold" : "text-ink"}`}>{value}</dd>
-      {note && <dd className="mt-1 font-mono text-[9px] tracking-[0.16em] text-ink/40">{note}</dd>}
-    </div>
-  );
-}
-
 /** 3-day Kp forecast as bars, coloured once they reach storm level. */
 function Forecast({ points, timeZone }: { points: { at: string; kp: number }[]; timeZone?: string }) {
   const days = new Map<string, { at: string; kp: number }[]>();
@@ -86,12 +75,13 @@ function Forecast({ points, timeZone }: { points: { at: string; kp: number }[]; 
   }
   return (
     <div className="mt-4">
-      <div className="flex h-24 items-end gap-[3px]" role="img" aria-label="Kp forecast for the next three days">
+      <div className="relative flex h-24 items-end gap-[3px]" role="img" aria-label="Kp forecast for the next three days">
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 border-t border-dashed border-gold/40" style={{ bottom: `${(5 / 9) * 100}%` }} />
         {points.slice(0, 24).map((p) => (
           <div
             key={p.at}
             title={`${fmtTime(p.at, timeZone)} · Kp ${p.kp.toFixed(1)}`}
-            className={`flex-1 ${p.kp >= 5 ? "bg-gold" : p.kp >= 4 ? "bg-ink/60" : "bg-ink/25"}`}
+            className={`flex-1 rounded-t-[3px] ${p.kp >= 5 ? "bg-gold" : p.kp >= 4 ? "bg-ink/55" : "bg-ink/20"}`}
             style={{ height: `${Math.max(4, (p.kp / 9) * 100)}%` }}
           />
         ))}
@@ -103,7 +93,7 @@ function Forecast({ points, timeZone }: { points: { at: string; kp: number }[]; 
           </span>
         ))}
       </div>
-      <p className="mt-2 font-mono text-[9px] tracking-[0.14em] text-ink/40">BARS IN GOLD REACH STORM LEVEL (KP 5+)</p>
+      <p className="mt-2 text-[11px] text-ink/40">Gold bars reach storm level (Kp 5+), above the dashed line.</p>
     </div>
   );
 }
@@ -115,6 +105,7 @@ export default function SpaceWeather() {
   const [data, setData] = useState<Data | null>(null);
   const [load, setLoad] = useState<Load>("loading");
   const [view, setView] = useState<View>("system");
+  const [clean, setClean] = useClean();
 
   const fetchData = useCallback(() => {
     fetch("/api/space-weather")
@@ -149,150 +140,135 @@ export default function SpaceWeather() {
   const tz = place?.timeZone;
   const wind = data?.wind;
 
-  return (
-    <main className="relative min-h-svh bg-void text-ink lg:h-svh lg:overflow-hidden">
-      <div className="relative h-[58svh] w-full lg:absolute lg:inset-0 lg:h-full">
-        <Scene drivers={drivers} aurora={grid?.texture ?? null} observer={place} view={view} />
-      </div>
+  const storm = kp !== null && kp >= 5;
 
-      <header className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-5 sm:p-8">
-        <div className="pointer-events-auto">
-          <Link href="/" className="font-mono text-[11px] tracking-[0.2em] text-ink/60 transition-colors hover:text-gold">
-            <ScrambleText text="← STELLR" />
-          </Link>
-          <h1 className="display mt-5 text-[clamp(1.6rem,3vw,2.8rem)] text-ink">Space Weather</h1>
-          <p className="caps mt-2 hidden max-w-[36ch] text-[11px] text-ink/55 sm:block sm:text-[12px]">
-            The Sun&apos;s wind, Earth&apos;s magnetic shield and tonight&apos;s aurora, live from NOAA. Sizes and distances are not to
-            scale; the data is real.
-          </p>
-        </div>
-        <div className="pointer-events-auto flex gap-2">
-          {(["system", "aurora"] as View[]).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setView(v)}
-              className={`whitespace-nowrap rounded-full border px-4 py-2 font-mono text-[10px] tracking-[0.2em] transition-colors ${
-                view === v ? "border-gold bg-gold text-void" : "border-ink/30 text-ink/70 hover:border-ink/60"
-              }`}
-            >
-              {v === "system" ? "SUN → EARTH" : "AURORA"}
+  /** The state of Earth's field right now, and NOAA's three scales. */
+  const nowCard = (
+    <div className={glass}>
+      <Section eyebrow="GEOMAGNETIC FIELD · NOW">
+        {load === "loading" ? (
+          <Status>READING NOAA FEEDS…</Status>
+        ) : load === "error" ? (
+          <Status tone="red">
+            NOAA DATA UNAVAILABLE ·{" "}
+            <button type="button" onClick={fetchData} className="text-gold hover:underline">
+              RETRY
             </button>
+          </Status>
+        ) : (
+          <Status tone={storm ? "gold" : "ink"}>{head.text}</Status>
+        )}
+        <div className="mt-4 flex items-end gap-3">
+          <span className={`display text-[56px] leading-[0.85] ${storm ? "text-gold" : "text-ink"}`}>{kp === null ? "—" : kp.toFixed(1)}</span>
+          <span className="pb-1 font-mono text-[9px] tracking-[0.2em] text-ink/45">
+            KP INDEX
+            <br />0 CALM · 9 EXTREME
+          </span>
+        </div>
+        <div className="mt-4 flex gap-[3px]" aria-hidden>
+          {Array.from({ length: 9 }, (_, i) => (
+            <div key={i} className={`h-2 flex-1 rounded-full ${kp !== null && kp >= i + 0.5 ? (i >= 4 ? "bg-gold" : "bg-ink/70") : "bg-ink/12"}`} />
           ))}
         </div>
-      </header>
-
-      <aside className="relative z-10 px-5 pb-10 sm:px-8 lg:absolute lg:bottom-8 lg:right-8 lg:top-28 lg:w-[388px] lg:overflow-y-auto lg:overflow-x-hidden lg:p-[4px]">
-        <div className="frame bg-void/70 backdrop-blur-md">
-          {/* Now */}
-          <div className="border-b border-ink/10 p-5">
-            <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">GEOMAGNETIC FIELD · NOW</p>
-            <p className={`mt-2 font-mono text-[12px] tracking-[0.18em] ${head.tone}`}>
-              {load === "loading" ? "READING NOAA FEEDS…" : load === "error" ? "NOAA DATA UNAVAILABLE" : head.text}
-            </p>
-            <div className="mt-4 flex items-end gap-4">
-              <span className="display text-5xl leading-none text-ink">{kp === null ? "—" : kp.toFixed(1)}</span>
-              <span className="pb-1 font-mono text-[10px] tracking-[0.2em] text-ink/50">KP INDEX · 0–9</span>
+      </Section>
+      <div className="grid grid-cols-3 border-t border-ink/[0.08]">
+        {(["R", "S", "G"] as const).map((k, i) => {
+          const sc = data?.scales?.[k];
+          return (
+            <div key={k} className={`px-3 py-4 text-center ${i ? "border-l border-ink/[0.08]" : ""}`}>
+              <p className={`display text-[24px] leading-none ${sc && sc.level > 0 ? "text-gold" : "text-ink"}`}>
+                {k}
+                {sc ? sc.level : "–"}
+              </p>
+              <p className="mt-1.5 font-mono text-[8px] tracking-[0.16em] text-ink/45">{k === "R" ? "RADIO BLACKOUT" : k === "S" ? "RADIATION" : "GEOMAG STORM"}</p>
             </div>
-            <div className="mt-3 flex gap-[3px]" aria-hidden>
-              {Array.from({ length: 9 }, (_, i) => (
-                <div
-                  key={i}
-                  className={`h-1.5 flex-1 ${kp !== null && kp >= i + 0.5 ? (i >= 4 ? "bg-gold" : "bg-ink/70") : "bg-ink/15"}`}
-                />
-              ))}
-            </div>
-            {load === "error" && (
-              <button type="button" onClick={fetchData} className="mt-3 font-mono text-[10px] tracking-[0.2em] text-gold hover:underline">
-                RETRY
-              </button>
-            )}
-          </div>
-
-          {/* Solar wind */}
-          <dl className="grid grid-cols-2 border-b border-ink/10 [&>div:nth-child(odd)]:border-r [&>div]:border-ink/10 [&>div:nth-child(-n+2)]:border-b">
-            <Stat label="SOLAR WIND" value={wind?.speed != null ? `${Math.round(wind.speed)} KM/S` : "—"} note={wind?.speed != null ? windWord(wind.speed) : undefined} hot={(wind?.speed ?? 0) >= 550} />
-            <Stat label="DENSITY" value={wind?.density != null ? `${wind.density.toFixed(1)} P/CM³` : "—"} hot={(wind?.density ?? 0) >= 15} />
-            <Stat
-              label="FIELD BZ"
-              value={wind?.bz != null ? `${wind.bz > 0 ? "+" : ""}${wind.bz.toFixed(1)} NT` : "—"}
-              note={wind?.bz != null ? (wind.bz <= -5 ? "SOUTHWARD · STORM FUEL" : wind.bz < 0 ? "SLIGHTLY SOUTH" : "NORTHWARD · CALM") : undefined}
-              hot={(wind?.bz ?? 0) <= -5}
-            />
-            <Stat label="FIELD STRENGTH" value={wind?.bt != null ? `${wind.bt.toFixed(1)} NT` : "—"} />
-          </dl>
-
-          {/* Sun */}
-          <dl className="grid grid-cols-2 border-b border-ink/10 [&>div:first-child]:border-r [&>div]:border-ink/10">
-            <Stat label="X-RAYS NOW" value={data?.flares?.now.class ?? "—"} note="FLARE CLASS A·B·C·M·X" hot={/^[MX]/.test(data?.flares?.now.class ?? "")} />
-            <Stat
-              label="24 H PEAK"
-              value={data?.flares?.peak.class ?? "—"}
-              note={data?.flares ? fmtTime(data.flares.peak.at, tz) : undefined}
-              hot={/^[MX]/.test(data?.flares?.peak.class ?? "")}
-            />
-          </dl>
-
-          {/* NOAA scales */}
-          <div className="grid grid-cols-3 border-b border-ink/10 text-center">
-            {(["R", "S", "G"] as const).map((k, i) => {
-              const s = data?.scales?.[k];
-              return (
-                <div key={k} className={`p-4 ${i < 2 ? "border-r border-ink/10" : ""}`}>
-                  <p className={`display text-2xl ${s && s.level > 0 ? "text-gold" : "text-ink"}`}>
-                    {k}
-                    {s ? s.level : "–"}
-                  </p>
-                  <p className="mt-1 font-mono text-[9px] tracking-[0.16em] text-ink/45">
-                    {k === "R" ? "RADIO BLACKOUT" : k === "S" ? "RADIATION" : "GEOMAG STORM"}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Aurora for the visitor */}
-          <div className="border-b border-ink/10 p-5">
-            <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">AURORA · YOUR SKY</p>
-            <div className="mt-3">
-              <PlacePicker state={placeState} />
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-4 font-mono">
-              <div>
-                <p className="text-[10px] tracking-[0.2em] text-ink/45">OVERHEAD</p>
-                <p className={`mt-1 text-xl tabular-nums ${chance && chance.overhead >= 10 ? "text-gold" : "text-ink"}`}>
-                  {chance ? `${chance.overhead}%` : "—"}
-                </p>
-              </div>
-              <div>
-                <p className="text-[10px] tracking-[0.2em] text-ink/45">ON THE HORIZON</p>
-                <p className={`mt-1 text-xl tabular-nums ${chance && chance.horizon >= 10 ? "text-gold" : "text-ink"}`}>
-                  {chance ? `${chance.horizon}%` : "—"}
-                </p>
-              </div>
-            </div>
-            <p className="caps mt-3 text-[10px] leading-relaxed text-ink/45">
-              {chance && chance.horizon >= 10
-                ? `Look ${place && place.lat < 0 ? "south" : "north"} from somewhere dark, after full night falls. Your location never leaves this page.`
-                : "Aurora is unlikely from here right now. Your location never leaves this page."}
-            </p>
-          </div>
-
-          {/* Forecast */}
-          <div className="p-5">
-            <p className="font-mono text-[10px] tracking-[0.2em] text-ink/45">KP FORECAST · NEXT 3 DAYS</p>
-            {data?.forecast?.length ? <Forecast points={data.forecast} timeZone={tz} /> : <p className="mt-4 font-mono text-xs text-ink/45">—</p>}
-          </div>
+          );
+        })}
+      </div>
+      <Section eyebrow="THE SUN · X-RAYS">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+          <Stat label="NOW" value={data?.flares?.now.class ?? "—"} sub="flare class A · B · C · M · X" accent={/^[MX]/.test(data?.flares?.now.class ?? "")} />
+          <Stat label="24 H PEAK" value={data?.flares?.peak.class ?? "—"} sub={data?.flares ? fmtTime(data.flares.peak.at, tz).toLowerCase() : undefined} accent={/^[MX]/.test(data?.flares?.peak.class ?? "")} />
         </div>
+      </Section>
+    </div>
+  );
 
-        <p className="mt-4 font-mono text-[10px] leading-relaxed tracking-[0.15em] text-ink/40">
-          DATA FROM{" "}
-          <a href="https://www.swpc.noaa.gov" target="_blank" rel="noreferrer" className="text-ink/70 hover:text-gold">
-            NOAA SPACE WEATHER PREDICTION CENTER
-          </a>{" "}
-          · REFRESHED EVERY 5 MIN{data ? ` · UPDATED ${fmtTime(data.at, tz)}` : ""}
+  /** The solar wind, the aurora where the visitor is, and the forecast. */
+  const detailCard = (
+    <div className={glass}>
+      <Section eyebrow="SOLAR WIND · AT L1">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+          <Stat label="SPEED" value={wind?.speed != null ? `${Math.round(wind.speed)} km/s` : "—"} sub={wind?.speed != null ? windWord(wind.speed).toLowerCase() : undefined} accent={(wind?.speed ?? 0) >= 550} />
+          <Stat label="DENSITY" value={wind?.density != null ? `${wind.density.toFixed(1)} p/cm³` : "—"} accent={(wind?.density ?? 0) >= 15} />
+          <Stat
+            label="FIELD BZ"
+            value={wind?.bz != null ? `${wind.bz > 0 ? "+" : ""}${wind.bz.toFixed(1)} nT` : "—"}
+            sub={wind?.bz != null ? (wind.bz <= -5 ? "southward · storm fuel" : wind.bz < 0 ? "slightly south" : "northward · calm") : undefined}
+            accent={(wind?.bz ?? 0) <= -5}
+          />
+          <Stat label="FIELD STRENGTH" value={wind?.bt != null ? `${wind.bt.toFixed(1)} nT` : "—"} />
+        </div>
+      </Section>
+      <Section eyebrow="AURORA · YOUR SKY">
+        <PlacePicker state={placeState} />
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          {[
+            ["OVERHEAD", chance?.overhead],
+            ["ON THE HORIZON", chance?.horizon],
+          ].map(([k, v]) => (
+            <div key={k as string} className={`rounded-xl px-3 py-3 ${typeof v === "number" && v >= 10 ? "bg-[#3dff9a]/[0.08]" : "bg-ink/[0.04]"}`}>
+              <p className="font-mono text-[9px] tracking-[0.18em] text-ink/45">{k}</p>
+              <p className={`display mt-1 text-[26px] leading-none ${typeof v === "number" && v >= 10 ? "text-[#7dffb8]" : "text-ink"}`}>{typeof v === "number" ? `${v}%` : "—"}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-[12px] leading-relaxed text-ink/50">
+          {chance && chance.horizon >= 10
+            ? `Look ${place && place.lat < 0 ? "south" : "north"} from somewhere dark, after full night falls.`
+            : "Aurora is unlikely from here right now."}{" "}
+          Your location never leaves this page.
         </p>
-      </aside>
+      </Section>
+      <Section eyebrow="KP FORECAST · NEXT 3 DAYS">
+        {data?.forecast?.length ? <Forecast points={data.forecast} timeZone={tz} /> : <p className="text-[13px] text-ink/45">—</p>}
+      </Section>
+    </div>
+  );
+
+  const note = (
+    <p className="px-2 font-mono text-[9px] leading-relaxed tracking-[0.14em] text-ink/35">
+      DATA FROM{" "}
+      <a href="https://www.swpc.noaa.gov" target="_blank" rel="noreferrer" className="text-ink/60 hover:text-gold">
+        NOAA SPACE WEATHER PREDICTION CENTER
+      </a>{" "}
+      · REFRESHED EVERY 5 MIN{data ? ` · UPDATED ${fmtTime(data.at, tz)}` : ""} · SIZES AND DISTANCES NOT TO SCALE; THE DATA IS REAL
+    </p>
+  );
+
+  return (
+    <main className="relative bg-void text-ink">
+      <section className={`relative w-full overflow-hidden ${clean ? "h-svh" : "h-[64svh] lg:h-svh"} min-h-[480px]`}>
+        <div className="absolute inset-0">
+          <Scene drivers={drivers} aurora={grid?.texture ?? null} observer={place} view={view} />
+        </div>
+        <SceneShade clean={clean} />
+        <ToolBar title="Space Weather" tagline="The Sun's wind, Earth's magnetic shield and tonight's aurora, live from NOAA." clean={clean} onClean={() => setClean(!clean)}>
+          <Segmented options={[["system", "Sun → Earth"], ["aurora", "Aurora"]]} value={view} onChange={(v) => setView(v as View)} />
+        </ToolBar>
+        {/* One column on the right: the Sun sits at the left of the scene. */}
+        <aside className={`cosmo-scroll absolute bottom-4 right-4 top-20 z-10 w-[360px] space-y-3 overflow-y-auto ${wide(clean)}`}>
+          {nowCard}
+          {detailCard}
+          <div className="mt-3">{note}</div>
+        </aside>
+        <CleanHint clean={clean} />
+      </section>
+      <div className={`space-y-4 px-4 pb-10 pt-4 lg:hidden ${clean ? "hidden" : ""}`}>
+        {nowCard}
+        {detailCard}
+        {note}
+      </div>
     </main>
   );
 }
