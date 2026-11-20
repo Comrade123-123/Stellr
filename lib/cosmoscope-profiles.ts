@@ -67,6 +67,7 @@ export const PROFILES: Record<BodyName, Profile> = {
       { title: "Granulation", text: "The surface is tiled with granules, convection cells about 1,000 km across, each a column of hot plasma rising and sinking in minutes." },
       { title: "Sunspots", text: "Darker, cooler patches where magnetic fields block the heat from below. Their numbers track the 11-year cycle." },
       { title: "The corona", text: "The outer atmosphere is over a million degrees, hundreds of times hotter than the surface. Why is still being worked out; Parker Solar Probe flies through it to find out." },
+      { title: "Prominences", text: "Loops and plumes of glowing gas, held up by magnetic fields, standing tens of thousands of kilometres off the edge of the disc. Under the pinkish-red chromosphere, they glow in hydrogen's red light." },
     ],
     missions: [
       { name: "SOHO", when: "1995–today", what: "ESA/NASA observatory watching the Sun from 1.5 million km sunward of Earth." },

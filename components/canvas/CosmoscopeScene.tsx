@@ -95,12 +95,51 @@ interface Shared {
   paths: Map<string, THREE.Sphere>;
 }
 
+/*
+ * Around the Sun's disc, on a quad that always faces the camera: the thin red chromosphere,
+ * prominences arching off the limb, and the corona's streamers fading out into space. `uScale`
+ * is the quad's half-width in solar radii, so r below is in solar radii from the centre.
+ */
 const coronaFragment = /* glsl */ `
+  uniform float uTime;
+  uniform float uScale;
   varying vec2 vUv;
+  float hash(float n) { return fract(sin(n) * 43758.5453); }
+  float noise1(float x) { float i = floor(x); float f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(hash(i), hash(i + 1.0), f); }
   void main() {
-    float d = length(vUv - 0.5) * 2.0;
-    float glow = pow(max(1.0 - d, 0.0), 3.0) * 0.9 + exp(-d * 9.0) * 0.6;
-    gl_FragColor = vec4(vec3(1.0, 0.78, 0.45) * glow, glow);
+    vec2 d = (vUv - 0.5) * 2.0 * uScale;
+    float r = length(d);
+    float a = atan(d.y, d.x);
+    float t = uTime * 0.02;
+    // Streamers: brighter and longer at some angles, slowly changing.
+    float streak = 0.0;
+    streak += noise1(a * 3.0 + t) * 0.6;
+    streak += noise1(a * 7.0 - t * 1.3 + 10.0) * 0.3;
+    streak += noise1(a * 19.0 + t * 0.7 + 30.0) * 0.1;
+    float fall = pow(max(r, 1.0), -2.6 - 1.4 * (1.0 - streak));
+    float corona = fall * (0.55 + 0.9 * streak) * smoothstep(0.98, 1.03, r);
+    vec3 col = mix(vec3(1.0, 0.82, 0.55), vec3(0.85, 0.88, 1.0), smoothstep(1.2, 3.0, r)) * corona;
+    // Chromosphere: a thin pinkish-red rim just above the surface.
+    float chromo = exp(-pow((r - 1.012) / 0.012, 2.0));
+    col += vec3(1.0, 0.28, 0.18) * chromo * 1.3;
+    // Prominences: a few loops and plumes of glowing gas standing off the limb.
+    float prom = 0.0;
+    for (int i = 0; i < 5; i++) {
+      float fi = float(i);
+      float centre = hash(fi * 7.1 + 1.0) * 6.2831853 + t * 0.15 * (hash(fi) - 0.5);
+      float width = 0.05 + 0.08 * hash(fi * 3.3);
+      float height = 0.06 + 0.12 * hash(fi * 5.7) * (0.75 + 0.25 * sin(uTime * 0.05 + fi));
+      float da = abs(mod(a - centre + 3.14159265, 6.2831853) - 3.14159265);
+      float arch = sqrt(max(0.0, 1.0 - pow(da / width, 2.0)));
+      float h = r - 1.0;
+      float shell = exp(-pow((h - height * arch) / (0.012 + 0.02 * arch), 2.0)) * step(0.0, h) * step(da, width);
+      float fil = 0.6 + 0.4 * noise1(r * 90.0 + a * 40.0 + uTime * 0.2);
+      prom += shell * fil * smoothstep(0.0, 0.25, arch);
+    }
+    col += vec3(1.0, 0.35, 0.2) * prom * 1.4;
+    // Fade to nothing well inside the quad, so its square edge never shows.
+    col *= 1.0 - smoothstep(uScale * 0.55, uScale * 0.95, r);
+    gl_FragColor = vec4(col, 1.0);
   }
 `;
 const glowFragment = /* glsl */ `
@@ -363,6 +402,7 @@ function Planets({
       depthWrite: false,
     });
     const corona = new THREE.ShaderMaterial({
+      uniforms: { uTime: common.uTime, uScale: { value: 7 } },
       vertexShader: quadVertex,
       fragmentShader: coronaFragment,
       transparent: true,
@@ -441,7 +481,11 @@ function Planets({
         u.uRadius.value = radius;
       }
       // The Sun keeps a visible glow even at true scale, where its disc is a speck.
-      if (b.name === "Sun" && corona.current) corona.current.scale.setScalar(radius * 7 + s.mix * 1.5);
+      if (b.name === "Sun" && corona.current) {
+        const size = radius * 7 + s.mix * 1.5;
+        corona.current.scale.setScalar(size);
+        parts.corona.uniforms.uScale.value = size / 2 / radius;
+      }
     });
     corona.current?.quaternion.copy(camera.quaternion);
     // Earth's weather drifts a little against the ground.

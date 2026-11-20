@@ -158,20 +158,45 @@ export const PLANET_FRAGMENT = /* glsl */ `
     float mu = max(dot(n, v), 0.0);
 
     #ifdef SUN
+      // The photosphere: granules (convection cells) over larger supergranules, sunspot groups in
+      // the active belts either side of the equator, bright faculae around them that show best
+      // near the edge, and limb darkening that turns the disc orange towards its rim.
+      float t = uTime;
       vec3 base = texture2D(map, vUv).rgb;
-      float t = uTime * 0.04;
-      float gran = fbm(p * 46.0 + vec3(t, -t, t * 0.7)) * 0.5 + 0.5;
-      // A few sunspots, in the bands either side of the equator where they form.
-      float band = smoothstep(0.55, 0.3, abs(p.y)) * smoothstep(0.04, 0.14, abs(p.y));
-      float sn = snoise(p * 2.6 + vec3(0.0, t * 0.05, 0.0));
-      float spots = (smoothstep(0.8, 0.86, sn) * 0.55 + smoothstep(0.87, 0.9, sn) * 0.45) * band;
-      // Limb darkening: white-yellow at the centre of the disc, deepening to orange at the edge.
-      vec3 centre = vec3(1.0, 0.88, 0.66);
-      vec3 limb = vec3(0.92, 0.42, 0.1);
-      vec3 c = mix(limb, centre, pow(mu, 0.6)) * (0.8 + 0.34 * gran) * (0.85 + 0.3 * dot(base, vec3(0.33)));
-      c *= 1.0 - spots * 0.8;
-      c *= mix(0.5, 1.0, pow(mu, 0.4));
-      gl_FragColor = vec4(c * 1.25, 1.0);
+      // Granules fade out where they'd be finer than a pixel, so the disc doesn't shimmer.
+      // Two scales of cells, each fading out where it would be finer than a pixel or two.
+      float px = length(fwidth(p));
+      float nearFade = 1.0 - smoothstep(0.15, 0.4, px * 70.0);
+      float farFade = 1.0 - smoothstep(0.15, 0.4, px * 24.0);
+      vec2 g = cellular(p * 70.0 + vec3(0.0, t * 0.02, 0.0));
+      vec2 g2 = cellular(p * 24.0 + vec3(t * 0.006, 0.0, 0.0));
+      float granule = nearFade * smoothstep(0.65, 0.15, g.x) * (0.8 + 0.4 * g.y) + farFade * 0.7 * smoothstep(0.7, 0.2, g2.x) * (0.7 + 0.3 * g2.y);
+      float lanes = nearFade * smoothstep(0.45, 0.85, g.x) + farFade * 0.7 * smoothstep(0.5, 0.9, g2.x);
+      float fine = 1.0;
+      float super = fbm(p * 9.0 + vec3(t * 0.004)) * 0.5 + 0.5;
+      // Active belts, about 5–35° from the equator; groups drift slowly with the rotation.
+      float lat = abs(p.y);
+      float belt = smoothstep(0.06, 0.14, lat) * smoothstep(0.6, 0.38, lat);
+      vec3 q = p + vec3(0.0, 0.0, t * 0.0015);
+      float act = snoise(q * 2.2) * 0.6 + snoise(q * 5.0) * 0.4;
+      float region = smoothstep(0.22, 0.5, act) * belt;
+      float spotField = snoise(q * 11.0) * 0.55 + snoise(q * 23.0) * 0.45;
+      float penumbra = smoothstep(0.36, 0.46, spotField) * region;
+      float umbra = smoothstep(0.55, 0.64, spotField) * region;
+      // Penumbral filaments: fine streaks running out from the spot.
+      float fil = 0.75 + 0.25 * sin(snoise(q * 60.0) * 9.0);
+      float faculae = smoothstep(0.15, 0.55, act) * belt * (1.0 - penumbra) * (0.35 + 0.65 * smoothstep(0.7, 0.15, mu));
+      // Limb darkening (I ∝ 1 − 0.6(1 − μ)), redder towards the limb.
+      float limbI = 1.0 - 0.6 * (1.0 - mu) - 0.15 * (1.0 - mu * mu);
+      vec3 hot = vec3(1.0, 0.86, 0.6);
+      vec3 cool = vec3(0.98, 0.52, 0.16);
+      vec3 c = mix(cool, hot, smoothstep(0.0, 0.9, mu));
+      float shade = 1.0 + fine * (0.16 * granule - 0.2 * lanes) + 0.08 * (super - 0.5) + 0.06 * (dot(base, vec3(0.33)) - 0.5);
+      c *= shade * limbI;
+      c *= 1.0 + faculae * 0.35;
+      c = mix(c, c * vec3(0.62, 0.42, 0.28) * fil, penumbra);
+      c = mix(c, vec3(0.13, 0.05, 0.02), umbra);
+      gl_FragColor = vec4(c * 1.02, 1.0);
       #include <colorspace_fragment>
       return;
     #endif

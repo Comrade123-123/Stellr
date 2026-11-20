@@ -283,6 +283,8 @@ export default function CosmoscopeTool() {
   const isTonight = shown ? fmt(shown, { day: "2-digit", month: "short", year: "numeric" }, tz) === fmt(opened, { day: "2-digit", month: "short", year: "numeric" }, tz) : true;
 
   const hide = clean ? "hidden" : "";
+  // Wide-screen panels: `lg:block` would override a plain `hidden`, so they drop it when hidden.
+  const wide = clean ? "hidden" : "hidden lg:block";
   const flip = (k: keyof Layers) => setLayers((l) => ({ ...l, [k]: !l[k] }));
   const looks = profile?.features.filter((f) => f.look) ?? [];
   const rail: { group: string; items: string[] }[] = [
@@ -591,7 +593,7 @@ export default function CosmoscopeTool() {
         </header>
 
         {/* Bodies, down the left on wide screens; a strip along the bottom on phones. */}
-        <nav aria-label="Bodies" className={`absolute left-4 top-20 z-10 hidden lg:block ${hide}`}>
+        <nav aria-label="Bodies" className={`absolute left-4 top-20 z-10 ${wide}`}>
           <Navigator
             selected={selected}
             onSelect={setSelected}
@@ -617,13 +619,13 @@ export default function CosmoscopeTool() {
         </nav>
 
         {/* Summary of the chosen object, on the right on wide screens. */}
-        <aside className={`absolute right-4 top-20 z-10 hidden w-[340px] lg:block ${hide}`}>
+        <aside className={`absolute right-4 top-20 z-10 w-[340px] ${wide}`}>
           <div className={`${glass} cosmo-scroll max-h-[calc(100svh-15rem)] overflow-y-auto`}>{card}</div>
           {trueScale && <p className="mt-3 px-2 text-[11px] leading-relaxed text-gold/90">True scale: distances and sizes in proportion. Dots mark the planets; at this scale even Jupiter is a speck.</p>}
         </aside>
 
         {/* Time, along the bottom on wide screens. */}
-        <div className={`absolute bottom-4 left-4 right-[372px] z-10 hidden lg:block ${hide}`}>
+        <div className={`absolute bottom-4 left-4 right-[372px] z-10 ${wide}`}>
           <Timeline shown={shown} today={today} mode={mode} reverse={reverse} presets={presets} onLive={goLive} onRate={(r) => setRate(r)} onReverse={() => {
             setReverse(!reverse);
             if (!mode.live && mode.rate) setRate(mode.rate, !reverse);
