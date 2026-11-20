@@ -130,6 +130,108 @@ function FindingCard({ f }: { f: Finding }) {
   );
 }
 
+interface Leads {
+  stars: number;
+  signals: number;
+  recovered: number;
+  ruledOut: number;
+  candidates: number;
+  strong: number;
+  leads: { investigation: Omit<Investigation, "findings">; finding: Finding }[];
+}
+
+/**
+ * The answer to "has Wobble found anything new?": every signal that matches no known planet and
+ * no TESS Object of Interest and survived the checks, strongest first.
+ */
+function NewLeads() {
+  const [data, setData] = useState<Leads | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [open, setOpen] = useState<number | null>(0);
+  useEffect(() => {
+    fetch("/api/wobble/leads", { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        setData((await res.json()) as Leads);
+        setState("ready");
+      })
+      .catch(() => setState("error"));
+  }, []);
+
+  return (
+    <section className="frame mt-6 bg-void/70 p-5 sm:p-6">
+      <p className="font-mono text-[10px] tracking-[0.22em] text-gold">IS ANYTHING NEW?</p>
+      {state === "loading" && <p className="mt-3 font-mono text-[11px] tracking-[0.16em] text-ink/55">READING THE WHOLE NOTEBOOK…</p>}
+      {state === "error" && <p className="mt-3 font-mono text-[11px] tracking-[0.16em] text-ink/55">COULDN&apos;T READ THE NOTEBOOK JUST NOW.</p>}
+      {state === "ready" && data && (
+        <>
+          <h2 className="display mt-3 text-[clamp(1.3rem,2.4vw,1.9rem)] leading-tight text-ink">
+            {data.candidates === 0
+              ? "Nothing new yet."
+              : data.candidates === 1
+                ? "One signal that matches nothing known."
+                : `${data.candidates} signals that match nothing known.`}
+          </h2>
+          <p className="caps mt-3 max-w-[78ch] text-[12px] leading-relaxed text-ink/60">
+            {data.candidates === 0
+              ? `Across ${data.stars.toLocaleString("en")} stars and ${data.signals} signals, everything Wobble found was a known planet or TESS candidate (${data.recovered}) or was ruled out by the checks (${data.ruledOut}). That is how surveys usually go; it keeps looking every day.`
+              : `Across ${data.stars.toLocaleString("en")} stars, ${data.recovered} signals were known planets or TESS candidates and ${data.ruledOut} were ruled out. These ${data.candidates === 1 ? "one is" : "are"} not on NASA's lists of confirmed planets or TESS Objects of Interest${data.strong ? `, and ${data.strong} look${data.strong === 1 ? "s" : ""} strong (planet-like score above 50%, signal-to-noise above 10, three or more transits)` : ""}. None is a discovery yet: each needs checking by people and follow-up observations before anyone could call it a planet.`}
+          </p>
+          {data.leads.length > 0 && (
+            <ol className="mt-5 divide-y divide-ink/10 border-y border-ink/10">
+              {data.leads.map((l, k) => {
+                const f = l.finding;
+                const i = l.investigation;
+                const strong = (f.score ?? 0) >= 0.5 && f.snr >= 10 && f.transits >= 3;
+                return (
+                  <li key={`${i.tic}-${k}`}>
+                    <button type="button" onClick={() => setOpen(open === k ? null : k)} className="flex w-full flex-wrap items-baseline gap-x-4 gap-y-1 py-3 text-left">
+                      <span className="w-6 font-mono text-[11px] text-ink/40">{String(k + 1).padStart(2, "0")}</span>
+                      <span className="min-w-[150px] text-[15px] text-ink">{i.label}</span>
+                      <span className="font-mono text-[10px] tracking-[0.12em] text-ink/50">
+                        {f.period.toFixed(3)} D · {depthText(f.depth)}
+                        {f.radiusEarth ? ` · ≈ ${f.radiusEarth.toFixed(1)} × EARTH` : ""}
+                        {f.world ? ` · ${f.world.kind.toUpperCase()}` : ""}
+                      </span>
+                      <span className="ml-auto flex items-center gap-2 font-mono text-[10px] tracking-[0.12em]">
+                        {i.reason === "candidate" && <span className="rounded-full border border-ink/20 px-2 py-0.5 text-ink/60">EXTRA SIGNAL ON A TOI STAR</span>}
+                        {strong && <span className="rounded-full bg-gold px-2 py-0.5 text-void">STRONG</span>}
+                        <span className="text-gold">{f.score === null ? "—" : `${Math.round(f.score * 100)}%`}</span>
+                      </span>
+                    </button>
+                    {open === k && (
+                      <div className="pb-5 pl-0 sm:pl-10">
+                        <p className="font-mono text-[10px] tracking-[0.14em] text-ink/45">
+                          TIC {i.tic} · FOUND {when(i.at)} · {i.reason === "candidate" ? "RE-EXAMINING A TESS CANDIDATE STAR" : "BLIND SEARCH"}
+                          {i.sectors.length ? ` · SECTORS ${i.sectors.join(", ")}` : ""}
+                        </p>
+                        <FindingCard f={f} />
+                        <div className="mt-4 flex flex-wrap gap-3 font-mono text-[10px] tracking-[0.18em]">
+                          <Link href={`/exoplanet-lab?tic=${i.tic}&label=${encodeURIComponent(i.label)}`} className="rounded-full border border-gold/60 px-4 py-2 text-gold transition-colors hover:bg-gold hover:text-void">
+                            OPEN IN EXOPLANET LAB →
+                          </Link>
+                          <a
+                            href={`https://exofop.ipac.caltech.edu/tess/target.php?id=${i.tic}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rounded-full border border-ink/25 px-4 py-2 text-ink/75 transition-colors hover:border-ink/60 hover:text-ink"
+                          >
+                            HAS ANYONE FLAGGED IT? EXOFOP →
+                          </a>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 /** Wobble's notebook: every star the agent has investigated, newest first. */
 export default function Wobble() {
   const [log, setLog] = useState<Log | null>(null);
@@ -332,6 +434,8 @@ export default function Wobble() {
             </p>
           </section>
         </div>
+
+        <NewLeads />
 
         <div className="mt-8 border-b border-ink/10 pb-5">
           <label htmlFor="wobble-search" className="font-mono text-[10px] tracking-[0.2em] text-ink/45">
