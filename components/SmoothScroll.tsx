@@ -15,7 +15,7 @@ export default function SmoothScroll() {
   useEffect(() => {
     const root = document.documentElement;
     const { reducedMotion } = getQuality();
-    const lenis = reducedMotion ? null : new Lenis({ lerp: 0.085, wheelMultiplier: 0.9 });
+    const lenis = reducedMotion ? null : new Lenis({ lerp: 0.085, wheelMultiplier: 0.9, anchors: true });
 
     const sync = () => {
       updateJourney(lenis ? lenis.scroll : window.scrollY);
